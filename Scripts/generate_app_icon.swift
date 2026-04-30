@@ -32,8 +32,111 @@ func ensureDir(_ url: URL) throws {
     }
 }
 
-func color(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
-    return NSColor(calibratedRed: r/255.0, green: g/255.0, blue: b/255.0, alpha: 1.0)
+func color(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1.0) -> NSColor {
+    return NSColor(calibratedRed: r/255.0, green: g/255.0, blue: b/255.0, alpha: a)
+}
+
+func point(center: NSPoint, radius: CGFloat, angle: CGFloat) -> NSPoint {
+    NSPoint(
+        x: center.x + cos(angle) * radius,
+        y: center.y + sin(angle) * radius
+    )
+}
+
+func withShadow(color: NSColor, blur: CGFloat, offset: NSSize, _ drawing: () -> Void) {
+    NSGraphicsContext.saveGraphicsState()
+    let shadow = NSShadow()
+    shadow.shadowColor = color
+    shadow.shadowBlurRadius = blur
+    shadow.shadowOffset = offset
+    shadow.set()
+    drawing()
+    NSGraphicsContext.restoreGraphicsState()
+}
+
+func drawCaptureBrackets(in rect: NSRect, length: CGFloat, lineWidth: CGFloat, color strokeColor: NSColor) {
+    let path = NSBezierPath()
+    path.lineWidth = lineWidth
+    path.lineCapStyle = .round
+    path.lineJoinStyle = .round
+
+    path.move(to: NSPoint(x: rect.minX, y: rect.maxY - length))
+    path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
+    path.line(to: NSPoint(x: rect.minX + length, y: rect.maxY))
+
+    path.move(to: NSPoint(x: rect.maxX - length, y: rect.maxY))
+    path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+    path.line(to: NSPoint(x: rect.maxX, y: rect.maxY - length))
+
+    path.move(to: NSPoint(x: rect.minX, y: rect.minY + length))
+    path.line(to: NSPoint(x: rect.minX, y: rect.minY))
+    path.line(to: NSPoint(x: rect.minX + length, y: rect.minY))
+
+    path.move(to: NSPoint(x: rect.maxX - length, y: rect.minY))
+    path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+    path.line(to: NSPoint(x: rect.maxX, y: rect.minY + length))
+
+    strokeColor.setStroke()
+    path.stroke()
+}
+
+func drawApertureMark(center: NSPoint, radius: CGFloat, pixels: CGFloat) {
+    let outerRect = NSRect(
+        x: center.x - radius,
+        y: center.y - radius,
+        width: radius * 2,
+        height: radius * 2
+    )
+    let outerPath = NSBezierPath(ovalIn: outerRect)
+
+    withShadow(
+        color: color(2, 8, 14, 0.32),
+        blur: pixels * 0.018,
+        offset: NSSize(width: 0, height: -pixels * 0.008)
+    ) {
+        NSGradient(colors: [
+            color(248, 253, 255),
+            color(136, 230, 244),
+            color(43, 188, 216)
+        ])!.draw(in: outerPath, angle: 120)
+    }
+
+    color(255, 255, 255, 0.72).setStroke()
+    outerPath.lineWidth = max(pixels * 0.006, 1)
+    outerPath.stroke()
+
+    let innerRadius = radius * 0.55
+    let innerRect = NSRect(
+        x: center.x - innerRadius,
+        y: center.y - innerRadius,
+        width: innerRadius * 2,
+        height: innerRadius * 2
+    )
+    let innerPath = NSBezierPath(ovalIn: innerRect)
+    NSGradient(colors: [
+        color(24, 36, 48),
+        color(8, 14, 22)
+    ])!.draw(in: innerPath, angle: -45)
+
+    if pixels >= 128 {
+        let bladeRadius = innerRadius * 0.88
+        let hubRadius = innerRadius * 0.28
+        for index in 0..<6 {
+            let a0 = CGFloat(index) * (.pi / 3.0) + .pi / 12.0
+            let a1 = a0 + .pi / 3.8
+            let path = NSBezierPath()
+            path.move(to: point(center: center, radius: hubRadius, angle: a0 + 0.28))
+            path.line(to: point(center: center, radius: bladeRadius, angle: a0))
+            path.line(to: point(center: center, radius: bladeRadius, angle: a1))
+            path.close()
+            color(112, 132, 145, index % 2 == 0 ? 0.34 : 0.22).setFill()
+            path.fill()
+        }
+    }
+
+    color(255, 255, 255, 0.34).setStroke()
+    innerPath.lineWidth = max(pixels * 0.0045, 1)
+    innerPath.stroke()
 }
 
 func drawAppIconBitmap(size pixels: Int) -> NSBitmapImageRep {
@@ -60,57 +163,109 @@ func drawAppIconBitmap(size pixels: Int) -> NSBitmapImageRep {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    let rect = NSRect(x: 0, y: 0, width: pixels, height: pixels)
+    let p = CGFloat(pixels)
+    let rect = NSRect(x: 0, y: 0, width: p, height: p)
+    color(0, 0, 0, 0).setFill()
+    NSBezierPath(rect: rect).fill()
 
-    // Background: rounded square with subtle diagonal gradient
-    let backgroundCornerRadius = CGFloat(pixels) * 0.223
-    let bgPath = NSBezierPath(roundedRect: rect, xRadius: backgroundCornerRadius, yRadius: backgroundCornerRadius)
-    let gradient = NSGradient(colors: [
-        color(98, 0, 234),   // Deep purple
-        color(3, 155, 229)   // Light blue
-    ])!
-    gradient.draw(in: bgPath, angle: 60)
+    let baseRect = rect.insetBy(dx: p * 0.055, dy: p * 0.055)
+    let baseRadius = p * 0.205
+    let basePath = NSBezierPath(roundedRect: baseRect, xRadius: baseRadius, yRadius: baseRadius)
 
-    // Foreground: selection rectangle with corner ticks and center dot
-    let inset = CGFloat(pixels) * 0.18
-    let selectionRect = rect.insetBy(dx: inset, dy: inset)
-    let selectionCorner: CGFloat = CGFloat(pixels) * 0.08
-    let lineWidth: CGFloat = max(CGFloat(pixels) * 0.045, 4)
-
-    NSColor.white.setStroke()
-    NSColor.white.setFill()
-
-    let selection = NSBezierPath(roundedRect: selectionRect, xRadius: selectionCorner, yRadius: selectionCorner)
-    selection.lineWidth = lineWidth
-    selection.stroke()
-
-    let tickLength: CGFloat = CGFloat(pixels) * 0.12
-    let tickOffset: CGFloat = CGFloat(pixels) * 0.02
-
-    func drawCornerTick(at origin: NSPoint, dx: CGFloat, dy: CGFloat) {
-        let path = NSBezierPath()
-        path.lineWidth = lineWidth
-        path.move(to: origin)
-        path.line(to: NSPoint(x: origin.x + dx * (tickLength + tickOffset), y: origin.y))
-        path.move(to: origin)
-        path.line(to: NSPoint(x: origin.x, y: origin.y + dy * (tickLength + tickOffset)))
-        path.stroke()
+    withShadow(
+        color: color(11, 19, 28, 0.34),
+        blur: p * 0.052,
+        offset: NSSize(width: 0, height: -p * 0.024)
+    ) {
+        NSGradient(colors: [
+            color(250, 252, 253),
+            color(229, 235, 240),
+            color(189, 201, 211)
+        ])!.draw(in: basePath, angle: 90)
     }
 
-    drawCornerTick(at: NSPoint(x: selectionRect.minX, y: selectionRect.maxY), dx: 1, dy: -1)
-    drawCornerTick(at: NSPoint(x: selectionRect.maxX, y: selectionRect.maxY), dx: -1, dy: -1)
-    drawCornerTick(at: NSPoint(x: selectionRect.minX, y: selectionRect.minY), dx: 1, dy: 1)
-    drawCornerTick(at: NSPoint(x: selectionRect.maxX, y: selectionRect.minY), dx: -1, dy: 1)
+    color(255, 255, 255, 0.72).setStroke()
+    basePath.lineWidth = max(p * 0.006, 1)
+    basePath.stroke()
 
-    let dotDiameter: CGFloat = CGFloat(pixels) * 0.09
-    let dotRect = NSRect(
-        x: selectionRect.midX - dotDiameter / 2,
-        y: selectionRect.midY - dotDiameter / 2,
-        width: dotDiameter,
-        height: dotDiameter
+    let baseInnerPath = NSBezierPath(
+        roundedRect: baseRect.insetBy(dx: p * 0.017, dy: p * 0.017),
+        xRadius: baseRadius * 0.88,
+        yRadius: baseRadius * 0.88
     )
-    let dotPath = NSBezierPath(ovalIn: dotRect)
-    dotPath.fill()
+    color(64, 80, 94, 0.16).setStroke()
+    baseInnerPath.lineWidth = max(p * 0.004, 1)
+    baseInnerPath.stroke()
+
+    let stageRect = NSRect(
+        x: p * 0.17,
+        y: p * 0.205,
+        width: p * 0.66,
+        height: p * 0.565
+    )
+    let stagePath = NSBezierPath(roundedRect: stageRect, xRadius: p * 0.075, yRadius: p * 0.075)
+
+    withShadow(
+        color: color(8, 12, 18, 0.38),
+        blur: p * 0.035,
+        offset: NSSize(width: 0, height: -p * 0.013)
+    ) {
+        NSGradient(colors: [
+            color(45, 61, 76),
+            color(23, 32, 43),
+            color(8, 13, 21)
+        ])!.draw(in: stagePath, angle: -55)
+    }
+
+    color(255, 255, 255, 0.18).setStroke()
+    stagePath.lineWidth = max(p * 0.006, 1)
+    stagePath.stroke()
+
+    if pixels >= 128 {
+        NSGraphicsContext.saveGraphicsState()
+        stagePath.addClip()
+        let sheenPath = NSBezierPath()
+        sheenPath.move(to: NSPoint(x: stageRect.minX - p * 0.05, y: stageRect.maxY - p * 0.08))
+        sheenPath.curve(
+            to: NSPoint(x: stageRect.maxX + p * 0.04, y: stageRect.maxY - p * 0.205),
+            controlPoint1: NSPoint(x: stageRect.midX - p * 0.13, y: stageRect.maxY + p * 0.04),
+            controlPoint2: NSPoint(x: stageRect.midX + p * 0.18, y: stageRect.maxY - p * 0.20)
+        )
+        sheenPath.lineWidth = max(p * 0.018, 2)
+        color(255, 255, 255, 0.10).setStroke()
+        sheenPath.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    let selectionRect = stageRect.insetBy(dx: p * 0.097, dy: p * 0.092)
+    let bracketLength = p * 0.135
+    let bracketWidth = max(p * 0.026, 2.0)
+
+    withShadow(
+        color: color(0, 8, 12, 0.48),
+        blur: p * 0.014,
+        offset: NSSize(width: 0, height: -p * 0.006)
+    ) {
+        drawCaptureBrackets(
+            in: selectionRect,
+            length: bracketLength,
+            lineWidth: bracketWidth,
+            color: color(73, 225, 245)
+        )
+    }
+
+    drawCaptureBrackets(
+        in: selectionRect.insetBy(dx: p * 0.003, dy: p * 0.003),
+        length: bracketLength * 0.91,
+        lineWidth: max(bracketWidth * 0.42, 1),
+        color: color(255, 255, 255, 0.76)
+    )
+
+    drawApertureMark(
+        center: NSPoint(x: selectionRect.midX, y: selectionRect.midY),
+        radius: p * 0.079,
+        pixels: p
+    )
 
     return rep
 }

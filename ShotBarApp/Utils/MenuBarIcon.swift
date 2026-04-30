@@ -10,45 +10,40 @@ enum MenuBarIcon {
         let image = NSImage(size: imageSize)
         image.lockFocus()
 
-        // Use current label color; template images ignore actual color when drawn in status bar
+        // Template images ignore the actual color in the menu bar.
         let strokeColor = NSColor.labelColor
         strokeColor.setStroke()
         strokeColor.setFill()
 
-        // Coordinate helpers
         let scale = size / 18.0
-        let lineWidth: CGFloat = 1.8 * scale
-        let cornerRadius: CGFloat = 3.0 * scale
-
-        // Draw a "selection" rounded rectangle inset
-        let inset: CGFloat = 3.0 * scale
+        let lineWidth: CGFloat = 1.7 * scale
+        let inset: CGFloat = 3.2 * scale
         let rect = NSRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
-        let selectionPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        selectionPath.lineWidth = lineWidth
-        selectionPath.stroke()
+        let bracketLength: CGFloat = 4.3 * scale
 
-        // Draw corner ticks to imply selection handles
-        let tickLength: CGFloat = 4.5 * scale
-        let tickOffset: CGFloat = 1.0 * scale
+        let bracketPath = NSBezierPath()
+        bracketPath.lineWidth = lineWidth
+        bracketPath.lineCapStyle = .round
+        bracketPath.lineJoinStyle = .round
 
-        func drawCornerTick(at origin: NSPoint, dx: CGFloat, dy: CGFloat) {
-            let path = NSBezierPath()
-            path.lineWidth = lineWidth
-            path.move(to: origin)
-            path.line(to: NSPoint(x: origin.x + dx * (tickLength + tickOffset), y: origin.y))
-            path.move(to: origin)
-            path.line(to: NSPoint(x: origin.x, y: origin.y + dy * (tickLength + tickOffset)))
-            path.stroke()
-        }
+        bracketPath.move(to: NSPoint(x: rect.minX, y: rect.maxY - bracketLength))
+        bracketPath.line(to: NSPoint(x: rect.minX, y: rect.maxY))
+        bracketPath.line(to: NSPoint(x: rect.minX + bracketLength, y: rect.maxY))
 
-        // Four corners (top-left, top-right, bottom-left, bottom-right)
-        drawCornerTick(at: NSPoint(x: rect.minX, y: rect.maxY), dx: 1, dy: -1)
-        drawCornerTick(at: NSPoint(x: rect.maxX, y: rect.maxY), dx: -1, dy: -1)
-        drawCornerTick(at: NSPoint(x: rect.minX, y: rect.minY), dx: 1, dy: 1)
-        drawCornerTick(at: NSPoint(x: rect.maxX, y: rect.minY), dx: -1, dy: 1)
+        bracketPath.move(to: NSPoint(x: rect.maxX - bracketLength, y: rect.maxY))
+        bracketPath.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+        bracketPath.line(to: NSPoint(x: rect.maxX, y: rect.maxY - bracketLength))
 
-        // Small "shutter" dot to hint screenshot/camera
-        let dotDiameter: CGFloat = 3.2 * scale
+        bracketPath.move(to: NSPoint(x: rect.minX, y: rect.minY + bracketLength))
+        bracketPath.line(to: NSPoint(x: rect.minX, y: rect.minY))
+        bracketPath.line(to: NSPoint(x: rect.minX + bracketLength, y: rect.minY))
+
+        bracketPath.move(to: NSPoint(x: rect.maxX - bracketLength, y: rect.minY))
+        bracketPath.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        bracketPath.line(to: NSPoint(x: rect.maxX, y: rect.minY + bracketLength))
+        bracketPath.stroke()
+
+        let dotDiameter: CGFloat = 3.1 * scale
         let dotRect = NSRect(
             x: rect.midX - dotDiameter / 2,
             y: rect.midY - dotDiameter / 2,

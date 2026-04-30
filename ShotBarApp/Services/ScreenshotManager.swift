@@ -42,31 +42,33 @@ final class ScreenshotManager: ObservableObject {
     // MARK: Entry points
 
     func captureSelection() {
-        SelectionOverlay.present { [weak self] selection, screen in
-            guard let self, let selection, let screen else { return }
-            Task { @MainActor in
-                do {
-                    // Allow the overlay windows to fully dismiss before capturing
-                    try? await Task.sleep(nanoseconds: 150_000_000)
-                    let nativeRect = CaptureGeometry.screencaptureRect(selection: selection, screenFrame: screen.frame)
+        Task { @MainActor in
+            // Dismiss the popover BEFORE the overlay appears so the popover
+            // doesn't occlude the content the user is trying to select.
+            await self.dismissPopoverAndSettle()
+            SelectionOverlay.present { [weak self] selection, screen in
+                guard let self, let selection, let screen else { return }
+                Task { @MainActor in
                     do {
-                        try self.saveNativeScreencapture(
-                            captureArguments: ["-R", CaptureGeometry.screencaptureArgument(for: nativeRect)],
-                            suffix: "Selection",
-                            logicalSize: selection.size
-                        )
-                        self.hideMenuBarPopover()
-                        return
-                    } catch {
-                        print("Native selection capture failed, falling back to ScreenCaptureKit: \(error)")
-                    }
+                        // Allow the overlay windows to fully dismiss before capturing
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                        let nativeRect = CaptureGeometry.screencaptureRect(selection: selection, screenFrame: screen.frame)
+                        do {
+                            try self.saveNativeScreencapture(
+                                captureArguments: ["-R", CaptureGeometry.screencaptureArgument(for: nativeRect)],
+                                suffix: "Selection",
+                                logicalSize: selection.size
+                            )
+                            return
+                        } catch {
+                            print("Native selection capture failed, falling back to ScreenCaptureKit: \(error)")
+                        }
 
-                    let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
-                    self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
-                    // Hide the menu bar popover after capture
-                    self.hideMenuBarPopover()
-                } catch {
-                    self.toast.show(text: "Selection failed: \(error.localizedDescription)")
+                        let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
+                        self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
+                    } catch {
+                        self.toast.show(text: "Selection failed: \(error.localizedDescription)", kind: .error)
+                    }
                 }
             }
         }
@@ -83,9 +85,13 @@ final class ScreenshotManager: ObservableObject {
             do {
                 // First, try to get the previously stored active application
                 guard let previousApp = previousActiveApp else {
-                    self.toast.show(text: "No active window detected. Please focus a window first, then try again.")
+                    self.toast.show(text: "No active window detected. Please focus a window first, then try again.", kind: .error)
                     return
                 }
+
+                // Dismiss the popover BEFORE capture so it isn't included in the
+                // window list / image and doesn't visually occlude the target.
+                await self.dismissPopoverAndSettle()
 
                 let content = try await SCShareableContent.current
 
@@ -111,7 +117,7 @@ final class ScreenshotManager: ObservableObject {
                 }
 
                 guard let targetWindow = targetAppWindows.first else {
-                    self.toast.show(text: "No captureable window found for \(previousApp.localizedName)")
+                    self.toast.show(text: "No captureable window found for \(previousApp.localizedName ?? "the previous app")", kind: .error)
                     return
                 }
 
@@ -124,7 +130,6 @@ final class ScreenshotManager: ObservableObject {
                         suffix: "Window",
                         logicalSize: targetWindow.frame.size
                     )
-                    self.hideMenuBarPopover()
                     return
                 } catch {
                     print("Native window capture failed, falling back to ScreenCaptureKit: \(error)")
@@ -154,18 +159,16 @@ final class ScreenshotManager: ObservableObject {
                             capturedImage = try await self.captureDisplayRegion(selection: tightFrame, on: windowScreen)
                         } catch {
                             // If fallback also fails, show error
-                            self.toast.show(text: "Failed to capture window: \(error.localizedDescription)")
+                            self.toast.show(text: "Failed to capture window: \(error.localizedDescription)", kind: .error)
                             return
                         }
                     }
                 }
 
                 self.saveAccordingToPreferences(cgImage: capturedImage, suffix: "Window")
-                // Hide the menu bar popover after capture
-                self.hideMenuBarPopover()
 
             } catch {
-                self.toast.show(text: "Window capture failed: \(error.localizedDescription)")
+                self.toast.show(text: "Window capture failed: \(error.localizedDescription)", kind: .error)
             }
         }
     }
@@ -173,10 +176,14 @@ final class ScreenshotManager: ObservableObject {
     func captureFullScreens() {
         Task { @MainActor in
             do {
+                // Dismiss the popover BEFORE capturing the screen, otherwise
+                // it shows up in every screenshot.
+                await self.dismissPopoverAndSettle()
+
                 let content = try await SCShareableContent.current
                 let displays = content.displays
                 if displays.isEmpty {
-                    self.toast.show(text: "No displays")
+                    self.toast.show(text: "No displays", kind: .error)
                     return
                 }
                 var saved = 0
@@ -215,13 +222,10 @@ final class ScreenshotManager: ObservableObject {
                     saved += 1
                 }
                 if saved == 0 {
-                    self.toast.show(text: "Full screen capture failed")
-                } else {
-                    // Hide the menu bar popover after successful capture
-                    self.hideMenuBarPopover()
+                    self.toast.show(text: "Full screen capture failed", kind: .error)
                 }
             } catch {
-                self.toast.show(text: "Full screen failed: \(error.localizedDescription)")
+                self.toast.show(text: "Full screen failed: \(error.localizedDescription)", kind: .error)
             }
         }
     }
@@ -229,11 +233,19 @@ final class ScreenshotManager: ObservableObject {
     // MARK: Menu Management
 
     private func hideMenuBarPopover() {
-        // Post notification to hide the menu bar popover
-        // This will be handled by the AppDelegate to close the popover
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NotificationCenter.default.post(name: NSNotification.Name("HideMenuBarPopover"), object: nil)
-        }
+        // Post notification synchronously; AppDelegate calls performClose, which animates.
+        NotificationCenter.default.post(name: NSNotification.Name("HideMenuBarPopover"), object: nil)
+    }
+
+    /// Closes the menu-bar popover and waits long enough for the dismissal
+    /// animation to finish so it isn't included in subsequent screenshots.
+    @MainActor
+    private func dismissPopoverAndSettle() async {
+        hideMenuBarPopover()
+        // NSPopover's default close animation is ~200ms. Add a small cushion
+        // so SCShareableContent no longer reports the popover as a window and
+        // the user's eye sees a clean screen before the capture takes place.
+        try? await Task.sleep(nanoseconds: 250_000_000)
     }
 
 
@@ -377,7 +389,7 @@ final class ScreenshotManager: ObservableObject {
         case .clipboard:
             try runScreencapture(arguments: baseArguments + ["-c"])
             DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Screenshot copied to clipboard")
+                self?.toast.show(text: "Screenshot copied to clipboard", kind: .success)
                 self?.playShutterSoundIfEnabled()
             }
         case .file:
@@ -573,7 +585,7 @@ final class ScreenshotManager: ObservableObject {
             }
             print("Successfully saved screenshot to: \(url.path)")
             DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Saved \(url.lastPathComponent)")
+                self?.toast.show(text: "Saved \(url.lastPathComponent)", kind: .success)
                 self?.playShutterSoundIfEnabled()
             }
         } catch {
@@ -584,7 +596,7 @@ final class ScreenshotManager: ObservableObject {
 
             // If saving to the preferred location fails, show error message
             DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Save failed: \(error.localizedDescription)")
+                self?.toast.show(text: "Save failed: \(error.localizedDescription)", kind: .error)
             }
         }
     }
