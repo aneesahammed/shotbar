@@ -20,6 +20,8 @@
     --line-soft: #e8edf5;
     --accent: #0a84ff;
     --accent-ink: #0057d9;
+    --cta-black: #0f172a;
+    --cta-black-hover: #020617;
     --paper: #ffffff;
   }
   *{ box-sizing:border-box; margin:0; padding:0; }
@@ -79,7 +81,7 @@
   /* ───────── buttons ───────── */
   .btn{
     display:inline-flex; align-items:center; gap:8px;
-    height: 40px; padding: 0 18px;
+    height: 36px; padding: 0 17px;
     border-radius: 8px;
     font-size: 14px; font-weight:600; letter-spacing:0;
     border: 1px solid transparent;
@@ -87,11 +89,11 @@
     cursor:pointer;
   }
   .btn:active{ transform: translateY(1px); }
-  .btn-primary{ background: var(--accent); color: var(--paper); }
-  .btn-primary:hover{ background: #006edc; }
+  .btn-primary{ background: var(--cta-black); color: var(--paper); }
+  .btn-primary:hover{ background: var(--cta-black-hover); }
   .btn-ghost{ background: transparent; color: var(--ink); border-color: var(--line); }
   .btn-ghost:hover{ border-color: var(--ink-3); }
-  .btn-lg{ height: 48px; padding: 0 22px; font-size:15px; }
+  .btn-lg{ height: 44px; padding: 0 21px; font-size:15px; }
   .btn .arrow{ transition: transform .2s ease; }
   .btn:hover .arrow{ transform: translateX(2px); }
 
