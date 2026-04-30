@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+secret_file_pattern='(^|/)(\.env($|\.)|AuthKey_.*\.p8$|.*\.(p8|p12|pem|key|keychain|keychain-db|mobileprovision|provisionprofile)$|ExportOptions\.plist$|.*\.xcconfig\.local$)'
+secret_value_pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk_(live|test)_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|SG\.[0-9A-Za-z_-]{20,}\.[0-9A-Za-z_-]{20,}|eyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|passwd)[[:space:]]*[:=][[:space:]]*['\''"]?[A-Za-z0-9_./+=-]{12,})'
+empty_tree="$(git hash-object -t tree /dev/null)"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        continue
+    fi
+
+    base="$remote_sha"
+    if [ "$base" = "0000000000000000000000000000000000000000" ]; then
+        base="$empty_tree"
+    fi
+
+    secret_files="$(
+        git diff --name-only "$base" "$local_sha" |
+            grep -E "$secret_file_pattern" |
+            grep -Ev '(^|/)\.env\.(example|sample)$' || true
+    )"
+
+    if [ -n "$secret_files" ]; then
+        echo "Push blocked: commits include a file that looks like a local secret or signing credential." >&2
+        printf '%s\n' "$secret_files" >&2
+        exit 1
+    fi
+
+    added_lines="$(
+        git diff --unified=0 --no-ext-diff "$base" "$local_sha" |
+            grep '^+' |
+            grep -v '^+++' || true
+    )"
+
+    if [ -n "$added_lines" ] && printf '%s\n' "$added_lines" | grep -Ei "$secret_value_pattern" >/dev/null; then
+        echo "Push blocked: commits include a value that looks like a secret." >&2
+        printf '%s\n' "$added_lines" | grep -Ei "$secret_value_pattern" >&2
+        exit 1
+    fi
+done

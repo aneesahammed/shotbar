@@ -154,12 +154,19 @@ struct MenuContentView: View {
                     .foregroundStyle(.tint)
                     .frame(width: 20)
 
+                Text("Shutter sound")
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
                 Toggle("Shutter sound", isOn: $prefs.soundEnabled)
+                    .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
 
             Divider()
                 .padding(.vertical, 2)

@@ -1,27 +1,71 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Create DMG for ShotBarApp distribution
-# This creates a professional-looking disk image for easy installation
+# Build, sign, and package ShotBarApp for distribution.
+# Notarization is required by default for release builds:
+#   Scripts/store_notary_credentials.sh
+#   ./create_dmg.sh
+#
+# For local packaging smoke tests only:
+#   SKIP_NOTARIZATION=1 ./create_dmg.sh
 
 APP_NAME="ShotBarApp"
-DMG_NAME="ShotBarApp-v1.0"
-SOURCE_DIR="./dist"
+PROJECT="ShotBarApp.xcodeproj"
+SCHEME="ShotBarApp"
+CONFIGURATION="Release"
+DERIVED_DATA="./build/ReleaseDmg"
+DIST_DIR="./dist"
 DMG_DIR="./dmg_temp"
 
-# Clean up any previous builds
-rm -rf "${DMG_DIR}"
-rm -f "${DMG_NAME}.dmg"
+build_setting() {
+    local key="$1"
+    xcodebuild \
+        -project "${PROJECT}" \
+        -scheme "${SCHEME}" \
+        -configuration "${CONFIGURATION}" \
+        -showBuildSettings 2>/dev/null |
+        awk -F= -v key="${key}" '
+            $1 ~ key {
+                gsub(/^[ \t]+|[ \t]+$/, "", $2)
+                print $2
+                exit
+            }
+        '
+}
 
-# Create temporary directory for DMG contents
-mkdir -p "${DMG_DIR}"
+VERSION="${VERSION:-$(build_setting MARKETING_VERSION)}"
+DMG_NAME="${DMG_NAME:-ShotBarApp-v${VERSION}}"
+BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/${APP_NAME}.app"
+DIST_APP="${DIST_DIR}/${APP_NAME}.app"
+DMG_PATH="${DMG_NAME}.dmg"
+NOTARY_KEYCHAIN_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-shotbar-notary}"
+REQUIRE_NOTARIZATION="${REQUIRE_NOTARIZATION:-1}"
 
-# Copy app to DMG directory
-cp -R "${SOURCE_DIR}/ShotBarApp.app" "${DMG_DIR}/"
+if [[ "${SKIP_NOTARIZATION:-0}" == "1" ]]; then
+    REQUIRE_NOTARIZATION=0
+fi
 
-# Create Applications symlink for easy installation
+echo "Building signed ${CONFIGURATION} app..."
+xcodebuild \
+    -project "${PROJECT}" \
+    -scheme "${SCHEME}" \
+    -configuration "${CONFIGURATION}" \
+    -destination "platform=macOS" \
+    -derivedDataPath "${DERIVED_DATA}" \
+    build
+
+echo "Preparing distribution app..."
+rm -rf "${DIST_DIR}" "${DMG_DIR}" "${DMG_PATH}"
+mkdir -p "${DIST_DIR}" "${DMG_DIR}"
+cp -R "${BUILT_APP}" "${DIST_APP}"
+
+echo "Verifying app signature..."
+codesign --verify --deep --strict --verbose=2 "${DIST_APP}"
+
+echo "Preparing DMG contents..."
+cp -R "${DIST_APP}" "${DMG_DIR}/"
 ln -s /Applications "${DMG_DIR}/Applications"
 
-# Create README for installation
 cat > "${DMG_DIR}/README.txt" << 'EOF'
 ShotBarApp - macOS Screenshot Utility
 =====================================
@@ -34,29 +78,46 @@ INSTALLATION:
 
 USAGE:
 - F1: Selection capture (drag to select area)
-- F2: Active window capture 
+- F2: Active window capture
 - F3: Full screen capture
 - Access preferences via menu bar icon
 
-NOTE: This app is unsigned. You may need to:
-1. Right-click the app and select "Open" 
-2. Click "Open" when macOS shows security warning
-3. Or go to System Preferences > Security & allow the app
-
-For support or tips: [Your tip jar/contact info here]
-
-Enjoy using ShotBarApp!
+NOTE:
+Public release DMGs are signed and notarized.
+Local smoke-test builds that skip notarization may show a macOS security warning.
 EOF
 
-# Create the DMG
 echo "Creating DMG..."
 hdiutil create -volname "${APP_NAME}" \
     -srcfolder "${DMG_DIR}" \
     -ov -format UDZO \
-    "${DMG_NAME}.dmg"
+    "${DMG_PATH}"
 
-# Clean up temp directory
 rm -rf "${DMG_DIR}"
 
-echo "DMG created: ${DMG_NAME}.dmg"
-echo "Size: $(du -h ${DMG_NAME}.dmg | cut -f1)"
+echo "Signing DMG..."
+codesign --force --sign "Developer ID Application" --timestamp "${DMG_PATH}"
+codesign --verify --verbose=2 "${DMG_PATH}"
+
+if xcrun notarytool history --keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" --output-format json >/dev/null 2>&1; then
+    echo "Submitting DMG for notarization..."
+    xcrun notarytool submit "${DMG_PATH}" \
+        --keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" \
+        --wait
+
+    echo "Stapling notarization ticket..."
+    xcrun stapler staple "${DMG_PATH}"
+    xcrun stapler validate "${DMG_PATH}"
+
+    echo "Checking Gatekeeper assessment..."
+    spctl -a -vv -t open --context context:primary-signature "${DMG_PATH}"
+elif [[ "${REQUIRE_NOTARIZATION}" == "0" ]]; then
+    echo "Skipping notarization because REQUIRE_NOTARIZATION=0."
+else
+    echo "Notarization is required but no valid notary profile was found: ${NOTARY_KEYCHAIN_PROFILE}" >&2
+    echo "Run Scripts/store_notary_credentials.sh, or set SKIP_NOTARIZATION=1 for local smoke tests only." >&2
+    exit 1
+fi
+
+echo "DMG created: ${DMG_PATH}"
+echo "Size: $(du -h "${DMG_PATH}" | cut -f1)"

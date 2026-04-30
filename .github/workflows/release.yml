@@ -1,0 +1,217 @@
+name: Release macOS DMG
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 1.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, notarize, and publish
+    runs-on: macos-15
+    environment: release
+    if: github.repository == 'aneesahammed/shotbar'
+    env:
+      NOTARY_KEYCHAIN_PROFILE: shotbar-notary
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+              VERSION="${{ inputs.version }}"
+              TAG="v${VERSION#v}"
+          else
+              TAG="${GITHUB_REF_NAME}"
+              VERSION="${TAG#v}"
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Release version must look like 1.1.0; got '${VERSION}'." >&2
+              exit 1
+          fi
+
+          MARKETING_VERSION="$(
+              xcodebuild \
+                  -project ShotBarApp.xcodeproj \
+                  -scheme ShotBarApp \
+                  -configuration Release \
+                  -showBuildSettings 2>/dev/null |
+                  awk -F= '/MARKETING_VERSION/ {
+                      gsub(/^[ \t]+|[ \t]+$/, "", $2)
+                      print $2
+                      exit
+                  }'
+          )"
+
+          if [[ "${MARKETING_VERSION}" != "${VERSION}" ]]; then
+              echo "Tag ${TAG} does not match MARKETING_VERSION=${MARKETING_VERSION}." >&2
+              exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "dmg=ShotBarApp-v${VERSION}.dmg" >> "${GITHUB_OUTPUT}"
+
+      - name: Check release secrets
+        id: secrets
+        shell: bash
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+              APPLE_APP_SPECIFIC_PASSWORD \
+              APPLE_ID \
+              APPLE_TEAM_ID \
+              DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 \
+              DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD
+          do
+              if [[ -z "${!name:-}" ]]; then
+                  missing+=("${name}")
+              fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+              printf 'Missing required GitHub secret: %s\n' "${missing[@]}" >&2
+              echo "::warning::Release secrets are not configured, so the CI signing/notarization release will be skipped."
+              echo "available=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+          fi
+
+          echo "available=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Skip release when secrets are unavailable
+        if: steps.secrets.outputs.available != 'true'
+        shell: bash
+        run: |
+          echo "Release secrets are not configured. See RELEASE.md to enable CI releases."
+
+      - name: Import Developer ID certificate
+        id: signing
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        env:
+          DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="${RUNNER_TEMP}/shotbar-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          CERTIFICATE_PATH="${RUNNER_TEMP}/developer-id-application.p12"
+
+          printf '%s' "${DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64}" | base64 -D > "${CERTIFICATE_PATH}"
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security default-keychain -s "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" $(security list-keychains -d user | tr -d '"')
+
+          security import "${CERTIFICATE_PATH}" \
+              -k "${KEYCHAIN_PATH}" \
+              -P "${DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD}" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/security \
+              -T /usr/bin/xcrun
+
+          security set-key-partition-list \
+              -S apple-tool:,apple:,codesign: \
+              -s \
+              -k "${KEYCHAIN_PASSWORD}" \
+              "${KEYCHAIN_PATH}"
+
+          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
+          echo "keychain_path=${KEYCHAIN_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Store notarization credentials
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          xcrun notarytool store-credentials "${NOTARY_KEYCHAIN_PROFILE}" \
+              --apple-id "${APPLE_ID}" \
+              --team-id "${APPLE_TEAM_ID}" \
+              --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+              --validate
+
+      - name: Build signed and notarized DMG
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.release.outputs.version }}" ./create_dmg.sh
+
+      - name: Verify DMG
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DMG="${{ steps.release.outputs.dmg }}"
+          test -f "${DMG}"
+          hdiutil verify "${DMG}"
+          xcrun stapler validate "${DMG}"
+          spctl -a -vv -t open --context context:primary-signature "${DMG}"
+
+      - name: Publish GitHub release
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.release.outputs.tag }}"
+          DMG="${{ steps.release.outputs.dmg }}"
+
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              gh release upload "${TAG}" "${DMG}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --clobber
+          else
+              gh release create "${TAG}" "${DMG}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --target "${GITHUB_SHA}" \
+                  --title "ShotBarApp ${TAG}" \
+                  --generate-notes
+          fi
+
+      - name: Delete temporary keychain
+        if: always() && steps.secrets.outputs.available == 'true' && steps.signing.outputs.keychain_path != ''
+        shell: bash
+        run: |
+          security delete-keychain "${{ steps.signing.outputs.keychain_path }}" || true

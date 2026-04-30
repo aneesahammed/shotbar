@@ -53,6 +53,22 @@ Documents/Shared Playground Data/
 
 # Environment files
 .env
+.env.*
+!.env.example
+!.env.sample
+
+# Secrets & signing credentials
+*.p8
+*.p12
+*.pem
+*.key
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.provisionprofile
+*.xcconfig.local
+AuthKey_*.p8
+ExportOptions.plist
 
 # Build output
 dist/

@@ -2,24 +2,23 @@
 
 ## Quick Install
 
-1. **Download** `ShotBarApp-v1.0.dmg`
+1. **Download** `ShotBarApp-v1.1.0.dmg`
 2. **Open** the DMG file
 3. **Drag** ShotBarApp.app to the Applications folder
 4. **Launch** ShotBarApp from Applications folder
 
 ## Important: macOS Security Notice
 
-Since this app is **unsigned** (distributed without Apple Developer ID), macOS will show security warnings. Here's how to handle them:
+Release builds are signed with Apple Developer ID and notarized by Apple. macOS can still ask you to confirm the first launch because the app was downloaded from the internet.
 
-### First Launch Method 1 (Recommended)
-1. **Right-click** (or Ctrl+click) on ShotBarApp.app in Applications
-2. Select **"Open"** from the context menu
-3. Click **"Open"** in the security dialog that appears
-4. The app is now trusted and will launch normally in the future
+### First Launch Method 1
+1. Open ShotBarApp.app from Applications
+2. Confirm the macOS launch dialog if it appears
+3. The app is now trusted and will launch normally in the future
 
-### First Launch Method 2 (System Preferences)
+### First Launch Method 2 (System Settings)
 1. Try to open ShotBarApp normally (it will be blocked)
-2. Go to **System Preferences → Security & Privacy → General**
+2. Go to **System Settings → Privacy & Security**
 3. Click **"Open Anyway"** next to the ShotBarApp message
 4. Click **"Open"** in the confirmation dialog
 
@@ -47,8 +46,8 @@ ShotBarApp needs **Screen Recording** permission to capture screenshots:
 ## Troubleshooting
 
 ### App Won't Open
-- **Problem**: "ShotBarApp can't be opened because it is from an unidentified developer"
-- **Solution**: Use the right-click → Open method described above
+- **Problem**: macOS blocks the app after download
+- **Solution**: Use the System Settings approval method described above
 
 ### Screenshots Don't Work
 - **Problem**: No screenshots are captured

@@ -50,15 +50,15 @@ A modern, lightweight macOS screenshot utility built with SwiftUI and ScreenCapt
 ### Installation
 
 #### Option 1: Download Release
-1. Download the latest `ShotBarApp-v1.0.dmg` from [Releases](../../releases)
+1. Download the latest `ShotBarApp-v1.1.0.dmg` from [Releases](../../releases)
 2. Open the DMG file
 3. Drag ShotBarApp to Applications folder
-4. **Important**: Right-click and select "Open" to bypass macOS security (unsigned app)
+4. Launch ShotBarApp from Applications
 
 #### Option 2: Build from Source
 ```bash
-git clone https://github.com/yourusername/ShotBarApp.git
-cd ShotBarApp
+git clone https://github.com/aneesahammed/shotbar.git
+cd shotbar
 xcodebuild -scheme ShotBarApp -configuration Release build
 ```
 
@@ -180,8 +180,8 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 ## ❓ Troubleshooting
 
 ### App Won't Open
-- **Problem**: "ShotBarApp can't be opened because it is from an unidentified developer"
-- **Solution**: Right-click the app → "Open" → Click "Open" in the dialog
+- **Problem**: macOS blocks the app after download
+- **Solution**: Confirm the first launch in System Settings → Privacy & Security, then reopen ShotBarApp
 
 ### Screenshots Don't Work
 - **Problem**: No screenshots are captured
