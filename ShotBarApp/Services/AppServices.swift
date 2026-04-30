@@ -26,7 +26,10 @@ final class AppServices {
     func rebindHotkeys() {
         hotkeys.unregisterAll()
         if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { [weak self] in self?.shots.captureSelection() } }
-        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { [weak self] in self?.shots.captureActiveWindow() } }
+        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { [weak self] in
+            self?.shots.storePreviousActiveApp()
+            self?.shots.captureActiveWindow()
+        } }
         if let hk = prefs.screenHotkey    { hotkeys.register(id: .screen,    hotkey: hk) { [weak self] in self?.shots.captureFullScreens() } }
     }
 }

@@ -13,15 +13,15 @@ final class ScreenshotManager: ObservableObject {
     @Published var saveDirectory: URL?
     private let toast = Toast()
     private var prefs: Preferences { AppServices.shared.prefs }
-    
+
     // Persist capture scale (pixels-per-point) for accurate clipboard DPI/size
     private var lastCapturePixelsPerPoint: CGFloat = 1.0
-    
+
     // Add property to store the previous active application
     private var previousActiveApp: NSRunningApplication?
-    
+
     // MARK: Save location
-    
+
     func refreshSaveDirectory() {
         // Use the app's Documents directory instead of Desktop to avoid permission issues
         // The Desktop directory requires special entitlements and can cause sandbox permission errors
@@ -30,7 +30,7 @@ final class ScreenshotManager: ObservableObject {
         saveDirectory = documentsDir
         print("Save directory set to: \(documentsDir.path)")
     }
-    
+
     func revealSaveLocationInFinder() {
         // Always reveal the app's Documents directory where screenshots are saved
         let dir = appDocumentsDirectory()
@@ -38,9 +38,9 @@ final class ScreenshotManager: ObservableObject {
         // Hide the menu bar popover after revealing folder
         hideMenuBarPopover()
     }
-    
+
     // MARK: Entry points
-    
+
     func captureSelection() {
         SelectionOverlay.present { [weak self] selection, screen in
             guard let self, let selection, let screen else { return }
@@ -48,6 +48,19 @@ final class ScreenshotManager: ObservableObject {
                 do {
                     // Allow the overlay windows to fully dismiss before capturing
                     try? await Task.sleep(nanoseconds: 150_000_000)
+                    let nativeRect = CaptureGeometry.screencaptureRect(selection: selection, screenFrame: screen.frame)
+                    do {
+                        try self.saveNativeScreencapture(
+                            captureArguments: ["-R", CaptureGeometry.screencaptureArgument(for: nativeRect)],
+                            suffix: "Selection",
+                            logicalSize: selection.size
+                        )
+                        self.hideMenuBarPopover()
+                        return
+                    } catch {
+                        print("Native selection capture failed, falling back to ScreenCaptureKit: \(error)")
+                    }
+
                     let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
                     self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
                     // Hide the menu bar popover after capture
@@ -58,13 +71,13 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-    
+
     // Make this method public so it can be called before the menubar becomes active
     func storePreviousActiveApp() {
         // Store the current frontmost app before our menubar becomes active
         previousActiveApp = NSWorkspace.shared.frontmostApplication
     }
-    
+
     func captureActiveWindow() {
         Task { @MainActor in
             do {
@@ -73,22 +86,22 @@ final class ScreenshotManager: ObservableObject {
                     self.toast.show(text: "No active window detected. Please focus a window first, then try again.")
                     return
                 }
-                
+
                 let content = try await SCShareableContent.current
-                
+
                 // Get the current ShotBar app bundle identifier to exclude it
                 let currentAppBundleID = Bundle.main.bundleIdentifier ?? "com.shotbarapp.ShotBarApp"
-                
+
                 // Filter windows to only include windows from the previously active app
                 let targetAppWindows = content.windows.filter { win in
                     guard let app = win.owningApplication else { return false }
-                    
+
                     // Only include windows from the previously active app
                     guard app.bundleIdentifier == previousApp.bundleIdentifier else { return false }
-                    
+
                     // Exclude ShotBar app itself
                     if app.bundleIdentifier == currentAppBundleID { return false }
-                    
+
                     // Only include on-screen windows with reasonable sizes
                     return win.isOnScreen &&
                     win.frame.width > 100 &&
@@ -96,34 +109,40 @@ final class ScreenshotManager: ObservableObject {
                     win.frame.width < 10000 &&
                     win.frame.height < 10000
                 }
-                
+
                 guard let targetWindow = targetAppWindows.first else {
                     self.toast.show(text: "No captureable window found for \(previousApp.localizedName)")
                     return
                 }
-                
-                // Use the desktopIndependentWindow approach but with better error handling
-                // This should capture only the specific window content
+
                 let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
                 let config = SCStreamConfiguration()
-                
-                // Set configuration to match the window's actual content size
-                let pxSize = pixelSize(forWindowFrame: targetWindow.frame)
-                config.width = pxSize.width
-                config.height = pxSize.height
-                
-                // Use best quality settings
+
+                do {
+                    try self.saveNativeScreencapture(
+                        captureArguments: ["-l", "\(targetWindow.windowID)"],
+                        suffix: "Window",
+                        logicalSize: targetWindow.frame.size
+                    )
+                    self.hideMenuBarPopover()
+                    return
+                } catch {
+                    print("Native window capture failed, falling back to ScreenCaptureKit: \(error)")
+                }
+
+                let scale = self.pixelScale(for: targetWindow.frame, preferredScale: CGFloat(filter.pointPixelScale))
+                config.width = max(1, Int(round(targetWindow.frame.width * scale.width)))
+                config.height = max(1, Int(round(targetWindow.frame.height * scale.height)))
+
                 config.captureResolution = .best
                 config.pixelFormat = kCVPixelFormatType_32BGRA
                 config.showsCursor = false
                 config.scalesToFit = false
-                
-                // Track pixels-per-point for clipboard DPI
-                let scale = (targetWindow.frame.width > 0) ? CGFloat(pxSize.width) / targetWindow.frame.width : 1.0
-                self.lastCapturePixelsPerPoint = max(scale, 1.0)
-                
+
+                self.lastCapturePixelsPerPoint = max(scale.width, scale.height, 1.0)
+
                 var capturedImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                
+
                 // Check if the capture resulted in a black image
                 if self.isMostlyBlack(capturedImage) {
                     // Fallback: Try to capture just the window area from the display
@@ -140,17 +159,17 @@ final class ScreenshotManager: ObservableObject {
                         }
                     }
                 }
-                
+
                 self.saveAccordingToPreferences(cgImage: capturedImage, suffix: "Window")
                 // Hide the menu bar popover after capture
                 self.hideMenuBarPopover()
-                
+
             } catch {
                 self.toast.show(text: "Window capture failed: \(error.localizedDescription)")
             }
         }
     }
-    
+
     func captureFullScreens() {
         Task { @MainActor in
             do {
@@ -164,25 +183,34 @@ final class ScreenshotManager: ObservableObject {
                 for (i, d) in displays.enumerated() {
                     let filter = SCContentFilter(display: d, excludingWindows: [])
                     let config = SCStreamConfiguration()
-                    let px = pixelSize(forDisplay: d)
-                    // Track pixels-per-point for clipboard DPI based on matching NSScreen
-                    if let ns = NSScreen.screens.first(where: { (($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value) == d.displayID }) {
-                        let scale = CGFloat(px.width) / ns.frame.width
-                        self.lastCapturePixelsPerPoint = max(scale, 1.0)
-                    } else {
-                        self.lastCapturePixelsPerPoint = max(CGFloat(px.width) / CGFloat(d.width), 1.0)
+                    let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
+
+                    if let ns = screen(for: d) {
+                        let nativeRect = CaptureGeometry.screencaptureRect(selection: ns.frame, screenFrame: ns.frame)
+                        do {
+                            try self.saveNativeScreencapture(
+                                captureArguments: ["-R", CaptureGeometry.screencaptureArgument(for: nativeRect)],
+                                suffix: suffix,
+                                logicalSize: ns.frame.size
+                            )
+                            saved += 1
+                            continue
+                        } catch {
+                            print("Native display capture failed, falling back to ScreenCaptureKit: \(error)")
+                        }
                     }
+
+                    let px = displayPixelSize(for: d, preferredScale: CGFloat(filter.pointPixelScale))
                     config.width = px.width
                     config.height = px.height
-                    
-                    // MARK: - Image Quality Enhancement
-                    config.captureResolution = .nominal
+                    self.lastCapturePixelsPerPoint = max(px.scale.width, px.scale.height, 1.0)
+
+                    config.captureResolution = .best
                     config.pixelFormat = kCVPixelFormatType_32BGRA
                     config.showsCursor = false
                     config.scalesToFit = false
-                    
+
                     let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                    let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
                     self.saveAccordingToPreferences(cgImage: cg, suffix: suffix)
                     saved += 1
                 }
@@ -197,9 +225,9 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-    
+
     // MARK: Menu Management
-    
+
     private func hideMenuBarPopover() {
         // Post notification to hide the menu bar popover
         // This will be handled by the AppDelegate to close the popover
@@ -207,12 +235,12 @@ final class ScreenshotManager: ObservableObject {
             NotificationCenter.default.post(name: NSNotification.Name("HideMenuBarPopover"), object: nil)
         }
     }
-    
-    
+
+
     // MARK: SCK helpers - FIXED FOR HIGH QUALITY SELECTION CAPTURE
     private func captureDisplayRegion(selection: CGRect, on screen: NSScreen) async throws -> CGImage {
         let content = try await SCShareableContent.current
-        
+
         // Map NSScreen -> SCDisplay via CGDirectDisplayID
         guard
             let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
@@ -220,122 +248,119 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "No display ID"])
         }
         let displayID = CGDirectDisplayID(num.uint32Value)
-        
+
         guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) else {
             throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "Display mapping failed"])
         }
-        
-        // Get the native display resolution
-        let displayPixelWidth = CGFloat(CGDisplayPixelsWide(displayID))
-        let displayPixelHeight = CGFloat(CGDisplayPixelsHigh(displayID))
-        
-        // Calculate true pixels per point (handles Retina/scaled displays correctly)
-        let pxPerPtX = displayPixelWidth / screen.frame.width
-        let pxPerPtY = displayPixelHeight / screen.frame.height
-        
-        // COORDINATE SYSTEM FIX:
-        // NSScreen coordinates: origin at bottom-left of main screen, Y increases upward
-        // SCDisplay coordinates: origin at top-left of each display, Y increases downward
-        // Selection comes in global NSScreen coordinates, need to convert to display-local pixel coordinates
-        
-        // Step 1: Convert selection from global NSScreen coordinates to this screen's local coordinates
-        // The selection is already in global coordinates from NSEvent.mouseLocation
-        var localSelection = selection
-        localSelection.origin.x -= screen.frame.minX  // Convert to screen-local X
-        
-        // Step 2: Fix Y coordinate conversion - flip from bottom-origin to top-origin
-        // NSScreen Y=0 is at bottom, but we need top-left origin for cropping
-        let screenBottomY = selection.origin.y
-        let screenTopY = screen.frame.height - screenBottomY - selection.height
-        localSelection.origin.y = screenTopY
-        
-        // Step 3: Convert from points to pixels with proper rounding
-        let pixelX = Int(round(localSelection.origin.x * pxPerPtX))
-        let pixelY = Int(round(localSelection.origin.y * pxPerPtY))
-        let pixelW = Int(round(localSelection.size.width * pxPerPtX))
-        let pixelH = Int(round(localSelection.size.height * pxPerPtY))
-        
-        // Ensure minimum size and bounds checking
-        guard pixelW >= 1, pixelH >= 1,
-              pixelX >= 0, pixelY >= 0,
-              pixelX + pixelW <= Int(displayPixelWidth),
-              pixelY + pixelH <= Int(displayPixelHeight) else {
+
+        let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
+        let displaySize = displayPixelSize(for: scDisplay, screen: screen, preferredScale: CGFloat(filter.pointPixelScale))
+        let cropRect = CaptureGeometry.cropRect(
+            selection: selection,
+            screenFrame: screen.frame,
+            scaleX: displaySize.scale.width,
+            scaleY: displaySize.scale.height
+        )
+
+        guard cropRect.width >= 1, cropRect.height >= 1,
+              cropRect.minX >= 0, cropRect.minY >= 0,
+              cropRect.maxX <= CGFloat(displaySize.width),
+              cropRect.maxY <= CGFloat(displaySize.height) else {
             throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection invalid or out of bounds"])
         }
-        
-        // CRITICAL FIX: Capture the entire display first, then crop
-        // This ensures we get the full native resolution quality
-        let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
+
         let cfg = SCStreamConfiguration()
-        
-        // Set to capture full display at native resolution
-        cfg.width = Int(displayPixelWidth)
-        cfg.height = Int(displayPixelHeight)
-        
-        // Use best quality settings
+
+        cfg.width = displaySize.width
+        cfg.height = displaySize.height
+
         cfg.captureResolution = .best
         cfg.pixelFormat = kCVPixelFormatType_32BGRA
         cfg.showsCursor = false
         cfg.scalesToFit = false
         cfg.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        
+
         // Set color space for proper color reproduction
         cfg.colorSpaceName = CGColorSpace.displayP3
-        
-        // Track the actual scale for DPI metadata
-        self.lastCapturePixelsPerPoint = max(pxPerPtX, pxPerPtY)
-        
-        // Capture the full display
+
+        self.lastCapturePixelsPerPoint = max(displaySize.scale.width, displaySize.scale.height, 1.0)
+
         let fullImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
-        
-        // Now crop to the selection area - coordinates are already in top-left origin
-        let cropRect = CGRect(x: pixelX, y: pixelY, width: pixelW, height: pixelH)
-        
+
         guard let croppedImage = fullImage.cropping(to: cropRect) else {
             throw NSError(domain: "ShotBar", code: -12, userInfo: [NSLocalizedDescriptionKey: "Failed to crop image"])
         }
-        
+
         return croppedImage
     }
-    
+
     static func promptForPermissionIfNeeded() {
         // There isn't a dedicated SCK authorization API; touching SCK triggers the system prompt.
         Task {
             _ = try? await SCShareableContent.current
         }
     }
-    
-    private func pixelSize(forDisplay d: SCDisplay) -> (width: Int, height: Int) {
-        // Always return the display's true native pixel dimensions.
-        // This avoids quality loss on scaled displays where points*backingScaleFactor
-        // may not equal the actual pixel resolution reported by CoreGraphics.
-        let w = Int(CGFloat(CGDisplayPixelsWide(d.displayID)))
-        let h = Int(CGFloat(CGDisplayPixelsHigh(d.displayID)))
-        return (w, h)
+
+    private func displayPixelSize(for display: SCDisplay, preferredScale: CGFloat? = nil) -> (width: Int, height: Int, scale: CGSize) {
+        let screen = screen(for: display)
+        return displayPixelSize(for: display, screen: screen, preferredScale: preferredScale)
     }
-    
-    private func pixelSize(forWindowFrame frame: CGRect) -> (width: Int, height: Int) {
-        // Determine the display under the window and compute true pixels-per-point
-        // using CoreGraphics' native pixel dimensions for that display.
+
+    private func screen(for display: SCDisplay) -> NSScreen? {
+        NSScreen.screens.first {
+            (($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value) == display.displayID
+        }
+    }
+
+    private func displayPixelSize(for display: SCDisplay, screen: NSScreen?, preferredScale: CGFloat? = nil) -> (width: Int, height: Int, scale: CGSize) {
+        guard let screen else {
+            let fallbackScale = preferredScale.flatMap { $0 > 0 ? $0 : nil } ?? 1
+            let width = max(Int(round(CGFloat(display.width) * fallbackScale)), Int(CGDisplayPixelsWide(display.displayID)), 1)
+            let height = max(Int(round(CGFloat(display.height) * fallbackScale)), Int(CGDisplayPixelsHigh(display.displayID)), 1)
+            return (width, height, CGSize(width: fallbackScale, height: fallbackScale))
+        }
+
+        let modePixelSize = CaptureGeometry.displayModePixelSize(for: display.displayID)
+        let legacyPixelSize = CaptureGeometry.legacyDisplayPixelSize(for: display.displayID)
+        let scale = CaptureGeometry.pixelsPerPoint(
+            pointSize: screen.frame.size,
+            displayModePixelSize: modePixelSize,
+            legacyDisplayPixelSize: legacyPixelSize,
+            backingScaleFactor: screen.backingScaleFactor,
+            preferredScale: preferredScale
+        )
+        let size = CaptureGeometry.outputPixelSize(
+            pointSize: screen.frame.size,
+            displayModePixelSize: modePixelSize,
+            legacyDisplayPixelSize: legacyPixelSize,
+            backingScaleFactor: screen.backingScaleFactor,
+            preferredScale: preferredScale
+        )
+
+        return (max(1, Int(size.width)), max(1, Int(size.height)), scale)
+    }
+
+    private func pixelScale(for frame: CGRect, preferredScale: CGFloat? = nil) -> CGSize {
         guard let windowScreen = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) ?? NSScreen.main,
               let displayNumber = windowScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         else {
-            // Reasonable fallback using a scale of 2.0 if no screen is found
-            let fallbackScale = 2.0 as CGFloat
-            return (Int(frame.width * fallbackScale), Int(frame.height * fallbackScale))
+            let fallback = preferredScale.flatMap { $0 > 0 ? $0 : nil } ?? 2.0
+            return CGSize(width: fallback, height: fallback)
         }
-        
+
         let displayID = CGDirectDisplayID(truncating: displayNumber)
-        let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / windowScreen.frame.width
-        let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / windowScreen.frame.height
-        let w = Int((frame.width  * pxPerPtX).rounded(.towardZero))
-        let h = Int((frame.height * pxPerPtY).rounded(.towardZero))
-        return (w, h)
+        return CaptureGeometry.pixelsPerPoint(
+            pointSize: windowScreen.frame.size,
+            displayModePixelSize: CaptureGeometry.displayModePixelSize(for: displayID),
+            legacyDisplayPixelSize: CaptureGeometry.legacyDisplayPixelSize(for: displayID),
+            backingScaleFactor: windowScreen.backingScaleFactor,
+            preferredScale: preferredScale
+        )
     }
-    
-    
+
+
     // MARK: Saving
-    
+
     private func saveAccordingToPreferences(cgImage: CGImage, suffix: String) {
         switch prefs.destination {
         case .clipboard:
@@ -344,42 +369,108 @@ final class ScreenshotManager: ObservableObject {
             self.save(cgImage: cgImage, suffix: suffix)
         }
     }
-    
+
+    private func saveNativeScreencapture(captureArguments: [String], suffix: String, logicalSize: CGSize?) throws {
+        let baseArguments = ["-x", "-t", "png"] + captureArguments
+
+        switch prefs.destination {
+        case .clipboard:
+            try runScreencapture(arguments: baseArguments + ["-c"])
+            DispatchQueue.main.async { [weak self] in
+                self?.toast.show(text: "Screenshot copied to clipboard")
+                self?.playShutterSoundIfEnabled()
+            }
+        case .file:
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ShotBarApp-\(UUID().uuidString)")
+                .appendingPathExtension("png")
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+
+            try runScreencapture(arguments: baseArguments + [tempURL.path])
+            let cgImage = try loadCGImage(from: tempURL)
+            updateLastCaptureScale(cgImage: cgImage, logicalSize: logicalSize)
+            save(cgImage: cgImage, suffix: suffix)
+        }
+    }
+
+    private func runScreencapture(arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = arguments
+
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(
+                domain: "ShotBar",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: message?.isEmpty == false ? message! : "screencapture failed"]
+            )
+        }
+    }
+
+    private func loadCGImage(from url: URL) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw NSError(domain: "ShotBar", code: -20, userInfo: [NSLocalizedDescriptionKey: "Failed to load native screenshot"])
+        }
+        return image
+    }
+
+    private func updateLastCaptureScale(cgImage: CGImage, logicalSize: CGSize?) {
+        guard let logicalSize,
+              logicalSize.width > 0,
+              logicalSize.height > 0 else {
+            lastCapturePixelsPerPoint = 1.0
+            return
+        }
+
+        let scaleX = CGFloat(cgImage.width) / logicalSize.width
+        let scaleY = CGFloat(cgImage.height) / logicalSize.height
+        lastCapturePixelsPerPoint = max(scaleX, scaleY, 1.0)
+    }
+
     private func saveToClipboard(cgImage: CGImage) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        
+
         let scale = max(self.lastCapturePixelsPerPoint, 1.0)
         let logicalSize = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
-        
+
         let imageRep = NSBitmapImageRep(cgImage: cgImage)
         imageRep.size = logicalSize
-        
+
         let nsImage = NSImage(size: logicalSize)
         nsImage.addRepresentation(imageRep)
-        
+
         // Write TIFF data using standard NSImage method
         if let tiffData = nsImage.tiffRepresentation {
             pasteboard.setData(tiffData, forType: .tiff)
         }
-        
+
         // Write PNG data using rep with no compression for high quality
         if let pngData = imageRep.representation(using: .png, properties: [.compressionFactor: 0.0]) {
             pasteboard.setData(pngData, forType: .png)
         }
-        
+
         DispatchQueue.main.async { [weak self] in
             self?.toast.show(text: "Screenshot copied to clipboard")
             self?.playShutterSoundIfEnabled()
         }
     }
-    
+
     private func createHighQualityPNGData(from cgImage: CGImage, dpi: Double? = nil) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
             return nil
         }
-        
+
         // Use high-quality PNG properties; include DPI when available
         var props: [CFString: Any] = [
             kCGImagePropertyPNGCompressionFilter: 0,
@@ -391,22 +482,22 @@ final class ScreenshotManager: ObservableObject {
             // PNG doesn't have a DPI unit key; consumers assume inches
         }
         props[kCGImagePropertyColorModel] = kCGImagePropertyColorModelRGB
-        
+
         CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
-        
+
         guard CGImageDestinationFinalize(destination) else {
             return nil
         }
-        
+
         return data as Data
     }
-    
+
     private func createHighQualityTIFFData(from cgImage: CGImage, dpi: Double? = nil) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.tiff.identifier as CFString, 1, nil) else {
             return nil
         }
-        
+
         var props: [CFString: Any] = [
             kCGImageDestinationEmbedThumbnail: false,
             kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB
@@ -420,12 +511,12 @@ final class ScreenshotManager: ObservableObject {
                 kCGImagePropertyTIFFResolutionUnit: 2 // inches
             ] as CFDictionary
         }
-        
+
         CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return data as Data
     }
-    
+
     // MARK: - Heuristics
     private func isMostlyBlack(_ cgImage: CGImage) -> Bool {
         guard let provider = cgImage.dataProvider, let data = provider.data as Data? else { return false }
@@ -461,20 +552,20 @@ final class ScreenshotManager: ObservableObject {
         let fraction = Double(nonBlackCount) / Double(maxSamples)
         return fraction < 0.01
     }
-    
+
     private func save(cgImage: CGImage, suffix: String) {
         let dir = saveDirectory ?? appDocumentsDirectory()
         let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
         let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
-        
+
         print("Attempting to save screenshot to: \(url.path)")
-        
+
         do {
             // Ensure directory exists and is writable
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-            
+
             let dpi = 72.0 * Double(self.lastCapturePixelsPerPoint)
-            
+
             // Try to save the image
             switch prefs.imageFormat {
             case .png: try savePNG(cgImage: cgImage, to: url, dpi: dpi)
@@ -490,26 +581,26 @@ final class ScreenshotManager: ObservableObject {
             print("Save failed: \(error)")
             print("Save directory: \(dir.path)")
             print("Save URL: \(url.path)")
-            
+
             // If saving to the preferred location fails, show error message
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Save failed: \(error.localizedDescription)")
             }
         }
     }
-    
+
     private func filename(suffix: String) -> String {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return "Screenshot \(df.string(from: Date())) \(suffix)"
     }
-    
+
     private func savePNG(cgImage: CGImage, to url: URL, dpi: Double) throws {
         let uti = UTType.png.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
             throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
-        
+
         // Add image metadata and properties for better quality
         var props: [CFString: Any] = [
             kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
@@ -523,13 +614,13 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
     }
-    
+
     private func saveJPG(cgImage: CGImage, to url: URL, quality: Double, dpi: Double) throws {
         let uti = UTType.jpeg.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
             throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
-        
+
         // Enhanced JPEG properties for better quality
         var props: [CFString: Any] = [
             kCGImageDestinationLossyCompressionQuality: quality,
@@ -544,30 +635,30 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
     }
-    
+
     private func playShutterSoundIfEnabled() {
         guard AppServices.shared.prefs.soundEnabled else { return }
         NSSound(named: NSSound.Name("Tink"))?.play()
     }
-    
+
     private func appDocumentsDirectory() -> URL {
         // Get the app's Documents directory and ensure it exists
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        
+
         // Create the directory if it doesn't exist
         do {
             try FileManager.default.createDirectory(at: documentsURL, withIntermediateDirectories: true, attributes: nil)
         } catch {
             print("Warning: Could not create Documents directory: \(error)")
         }
-        
+
         return documentsURL
     }
-    
+
     private func defaultDesktop() -> URL {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
     }
-    
+
     private func macOSScreenshotDirectory() -> URL? {
         let domain = "com.apple.screencapture" as CFString
         if let v = CFPreferencesCopyAppValue("location" as CFString, domain) {
@@ -579,23 +670,23 @@ final class ScreenshotManager: ObservableObject {
         }
         return nil
     }
-    
+
     // Helper function to create a tighter frame that avoids overlapping UI elements
     private func createTightWindowFrame(from windowFrame: CGRect, on screen: NSScreen) -> CGRect {
         // Reduce the frame size slightly to avoid capturing overlapping UI elements
         let inset: CGFloat = 2.0 // 2 points inset to avoid borders and overlapping elements
-        
+
         var tightFrame = windowFrame.insetBy(dx: inset, dy: inset)
-        
+
         // Ensure the frame doesn't go outside the screen bounds
         let screenFrame = screen.frame
         tightFrame = tightFrame.intersection(screenFrame)
-        
+
         // Ensure minimum size
         if tightFrame.width < 50 || tightFrame.height < 50 {
             tightFrame = windowFrame // Fall back to original frame if too small
         }
-        
+
         return tightFrame
     }
 }
