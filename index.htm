@@ -96,7 +96,7 @@
   .btn:hover .arrow{ transform: translateX(2px); }
 
   /* ───────── hero ───────── */
-  .hero{ padding: 120px 0 80px; position:relative; overflow:hidden; }
+  .hero{ padding: 72px 0 48px; position:relative; overflow:hidden; }
   .eyebrow{
     display:inline-flex; align-items:center; gap:10px;
     font-size:12px; letter-spacing:0.08em; text-transform:uppercase;
@@ -107,28 +107,28 @@
     box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 18%, transparent);
   }
   .hero h1{
-    margin-top: 28px;
-    font-size: 92px;
-    line-height: 0.96;
+    margin-top: 20px;
+    font-size: 78px;
+    line-height: 0.98;
     letter-spacing: 0;
     max-width: 14ch;
   }
   .hero h1 .accent{ color: var(--accent-ink); }
   .hero .lede{
-    margin-top: 36px;
+    margin-top: 22px;
     max-width: 52ch;
     font-size: 19px;
     line-height: 1.55;
     color: var(--ink-2);
   }
   .hero .actions{
-    margin-top: 40px;
+    margin-top: 26px;
     display:flex; gap:12px; flex-wrap:wrap;
   }
   .hero .meta{
-    margin-top: 56px;
-    display:flex; gap: 48px; flex-wrap:wrap;
-    padding-top: 28px;
+    margin-top: 34px;
+    display:flex; gap: 36px; flex-wrap:wrap;
+    padding-top: 20px;
     border-top: 1px solid var(--line-soft);
     font-size: 13px; color: var(--ink-3);
   }
@@ -136,11 +136,11 @@
 
   /* ───────── product visual ───────── */
   .stage{
-    margin: 80px 0 0;
+    margin: 48px 0 0;
     background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
     border: 1px solid var(--line-soft);
     border-radius: 18px;
-    padding: 56px 32px 0;
+    padding: 36px 24px 0;
     position: relative;
     overflow:hidden;
   }
@@ -186,7 +186,7 @@
 
   .scene{
     position: relative;
-    height: 360px;
+    height: 300px;
     background: var(--paper);
     border-radius: 0 0 10px 10px;
     border-top: 1px solid color-mix(in oklch, var(--ink) 20%, transparent);
@@ -260,7 +260,7 @@
   .marquee{
     position:absolute;
     left: 6%; bottom: 18%;
-    width: 320px; height: 180px;
+    width: 300px; height: 160px;
     border: 1.5px dashed var(--accent);
     background: color-mix(in oklch, var(--accent) 8%, transparent);
     border-radius: 4px;
@@ -292,21 +292,21 @@
   }
 
   /* ───────── section labels ───────── */
-  .sec{ padding: 120px 0; border-top: 1px solid var(--line-soft); }
-  .sec-head{ display:flex; gap: 80px; align-items:flex-start; margin-bottom: 64px; }
+  .sec{ padding: 72px 0; border-top: 1px solid var(--line-soft); }
+  .sec-head{ display:flex; gap: 56px; align-items:flex-start; margin-bottom: 36px; }
   .sec-head .label{
     flex: 0 0 140px;
     font-size: 12px; letter-spacing:0.1em; text-transform:uppercase;
-    color: var(--ink-3); padding-top: 14px;
+    color: var(--ink-3); padding-top: 8px;
   }
   .sec-head h2{
     flex: 1;
-    font-size: 56px;
+    font-size: 46px;
     line-height: 1.02; letter-spacing:0;
     max-width: 18ch;
   }
   .sec-head p{
-    margin-top: 20px; max-width: 50ch;
+    margin-top: 12px; max-width: 50ch;
     font-size: 17px; color: var(--ink-2);
   }
 
@@ -319,11 +319,11 @@
     border-left: 1px solid var(--line-soft);
   }
   .feature{
-    padding: 40px 36px 44px;
+    padding: 26px 28px 30px;
     border-right: 1px solid var(--line-soft);
     border-bottom: 1px solid var(--line-soft);
-    display:flex; flex-direction:column; gap: 16px;
-    min-height: 220px;
+    display:flex; flex-direction:column; gap: 10px;
+    min-height: 176px;
     transition: background .2s ease;
   }
   .feature:hover{ background: color-mix(in oklch, var(--bg-2) 60%, transparent); }
@@ -333,11 +333,11 @@
   }
   .feature h3{
     font-family: var(--display); font-weight:650;
-    font-size: 28px; line-height: 1.1; letter-spacing:0;
+    font-size: 24px; line-height: 1.1; letter-spacing:0;
   }
-  .feature p{ color: var(--ink-2); font-size: 15px; line-height:1.55; max-width: 36ch; }
+  .feature p{ color: var(--ink-2); font-size: 15px; line-height:1.45; max-width: 36ch; }
   .feature .glyph-lg{
-    width: 32px; height: 32px; color: var(--ink); margin-bottom:4px;
+    width: 26px; height: 26px; color: var(--ink); margin-bottom:2px;
   }
 
   /* ───────── shortcuts strip ───────── */
@@ -350,42 +350,42 @@
     background: var(--paper);
   }
   .shortcut{
-    padding: 36px 32px;
-    display:flex; flex-direction: column; gap: 14px;
+    padding: 24px;
+    display:flex; flex-direction: column; gap: 10px;
     border-right: 1px solid var(--line-soft);
     position:relative;
   }
   .shortcut:last-child{ border-right: none; }
   .shortcut .key{
     display:inline-flex; align-items:center; justify-content:center;
-    width: 56px; height: 56px;
+    width: 46px; height: 46px;
     border-radius: 10px;
     background: var(--bg);
     border: 1px solid var(--line);
     box-shadow: inset 0 -2px 0 var(--line), 0 1px 2px oklch(20% 0.012 60 / .04);
     font-family:var(--mono-stack);
-    font-size: 18px; font-weight:500; color: var(--ink);
+    font-size: 16px; font-weight:500; color: var(--ink);
   }
   .shortcut h4{
     font-family: var(--display); font-weight:650;
-    font-size: 25px; line-height:1.1; letter-spacing:0;
+    font-size: 22px; line-height:1.1; letter-spacing:0;
   }
   .shortcut p{ color: var(--ink-2); font-size:14px; max-width: 28ch; }
 
   /* ───────── tech section ───────── */
   .tech-grid{
-    display:grid; grid-template-columns: 1fr 1fr; gap: 64px;
+    display:grid; grid-template-columns: 1fr 1fr; gap: 44px;
     margin-top: 8px;
   }
   .tech-col{ min-width: 0; }
   .tech-col h3{
     font-family: var(--display); font-weight:650;
-    font-size: 28px; margin-bottom: 16px; letter-spacing:0;
+    font-size: 24px; margin-bottom: 10px; letter-spacing:0;
   }
-  .tech-col p{ color: var(--ink-2); margin-bottom: 20px; font-size:15px; }
+  .tech-col p{ color: var(--ink-2); margin-bottom: 14px; font-size:15px; }
   .tech-col ul{ list-style:none; }
   .tech-col li{
-    padding: 14px 0;
+    padding: 10px 0;
     border-top: 1px solid var(--line-soft);
     display:flex; gap: 14px; align-items:flex-start;
     font-size: 15px;
@@ -398,7 +398,7 @@
   pre.code{
     background: oklch(15% 0.010 60);
     color: oklch(88% 0.010 80);
-    padding: 22px 24px; border-radius: 10px;
+    padding: 18px 20px; border-radius: 10px;
     font-family:var(--mono-stack);
     font-size: 12.5px; line-height: 1.7;
     max-width: 100%;
@@ -411,8 +411,8 @@
   .dl-card{
     background: var(--ink); color: var(--paper);
     border-radius: 18px;
-    padding: 56px 56px 48px;
-    display:grid; grid-template-columns: 1.2fr 1fr; gap: 56px;
+    padding: 40px 44px 38px;
+    display:grid; grid-template-columns: 1.2fr 1fr; gap: 36px;
     align-items: center;
     position:relative; overflow:hidden;
   }
@@ -425,15 +425,15 @@
   }
   .dl-card h2{
     font-family: var(--display); font-weight:650;
-    font-size: 52px; line-height:1.02; letter-spacing:0;
-    margin-bottom: 20px;
+    font-size: 42px; line-height:1.02; letter-spacing:0;
+    margin-bottom: 14px;
   }
-  .dl-card p{ color: oklch(78% 0.012 80); font-size:16px; max-width: 40ch; margin-bottom: 28px; }
+  .dl-card p{ color: oklch(78% 0.012 80); font-size:16px; max-width: 40ch; margin-bottom: 20px; }
   .dl-card .btn-primary{ background: var(--paper); color: var(--ink); }
   .dl-card .btn-primary:hover{ background: oklch(94% 0 0); }
   .dl-card .btn-ghost{ color: var(--paper); border-color: oklch(40% 0.012 60); }
   .dl-card .btn-ghost:hover{ border-color: oklch(70% 0.012 60); }
-  .dl-meta{ font-family:var(--mono-stack); font-size:12px; color: oklch(60% 0.012 60); margin-top: 24px; letter-spacing:0.02em; }
+  .dl-meta{ font-family:var(--mono-stack); font-size:12px; color: oklch(60% 0.012 60); margin-top: 16px; letter-spacing:0.02em; }
   .dl-side pre.code{
     background: oklch(11% 0.010 60);
     border: 1px solid oklch(28% 0.012 60);
@@ -445,7 +445,7 @@
   .faq-list{ border-top: 1px solid var(--line); }
   .faq-item{
     border-bottom: 1px solid var(--line);
-    padding: 24px 0;
+    padding: 16px 0;
     display:grid; grid-template-columns: 80px 1fr; gap: 32px;
     cursor: pointer;
   }
@@ -455,20 +455,20 @@
   }
   .faq-item h4{
     font-family: var(--display); font-weight:650;
-    font-size: 24px; line-height:1.2; letter-spacing:0;
-    margin-bottom: 8px;
+    font-size: 21px; line-height:1.2; letter-spacing:0;
+    margin-bottom: 6px;
   }
   .faq-item p{ color: var(--ink-2); font-size:15px; max-width: 60ch; }
 
   /* ───────── footer ───────── */
   footer{
     border-top: 1px solid var(--line-soft);
-    padding: 56px 0 40px;
-    margin-top: 80px;
+    padding: 36px 0 30px;
+    margin-top: 40px;
   }
   .foot-grid{
     display:grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px;
-    margin-bottom: 56px;
+    margin-bottom: 32px;
   }
   .foot-grid h5{
     font-size: 12px; letter-spacing: 0.1em; text-transform:uppercase;
@@ -485,22 +485,28 @@
 
   /* responsive */
   @media (max-width: 800px){
-    .hero{ padding: 80px 0 60px; }
-    .hero h1{ font-size: 56px; }
-    .sec-head h2{ font-size: 40px; }
-    .dl-card h2{ font-size: 40px; }
-    .sec{ padding: 80px 0; }
-    .sec-head{ flex-direction: column; gap: 24px; margin-bottom: 40px; }
+    .hero{ padding: 48px 0 36px; }
+    .hero h1{ font-size: 44px; margin-top: 16px; }
+    .hero .lede{ margin-top: 18px; font-size: 17px; }
+    .hero .actions{ margin-top: 20px; }
+    .hero .meta{ margin-top: 26px; gap: 18px 28px; padding-top: 16px; }
+    .sec-head h2{ font-size: 34px; }
+    .dl-card h2{ font-size: 32px; }
+    .sec{ padding: 52px 0; }
+    .sec-head{ flex-direction: column; gap: 16px; margin-bottom: 28px; }
     .features{ grid-template-columns: 1fr; }
     .shortcuts{ grid-template-columns: 1fr; }
     .shortcut{ border-right:none; border-bottom: 1px solid var(--line-soft); }
     .shortcut:last-child{ border-bottom:none; }
-    .tech-grid{ grid-template-columns: 1fr; gap: 40px; }
-    .dl-card{ grid-template-columns: 1fr; padding: 36px 28px; gap: 32px; }
+    .feature{ padding: 22px 24px 24px; min-height: auto; }
+    .shortcut{ padding: 22px 24px; }
+    .tech-grid{ grid-template-columns: 1fr; gap: 28px; }
+    .dl-card{ grid-template-columns: 1fr; padding: 28px 24px; gap: 22px; }
     .foot-grid{ grid-template-columns: 1fr 1fr; }
     nav.top ul{ display:none; }
     .menubar .right{ display:none; }
-    .stage{ padding: 32px 16px 0; }
+    .stage{ margin-top: 34px; padding: 24px 14px 0; }
+    .scene{ height: 280px; }
     .popover{ right: 12px; width: 240px; }
   }
 </style>
