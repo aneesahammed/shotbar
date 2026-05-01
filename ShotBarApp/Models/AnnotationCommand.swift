@@ -48,6 +48,7 @@ final class AnnotationDocumentModel: ObservableObject {
     @Published var selectedColor: AnnotationColor
     @Published var strokeWidth: CGFloat
     @Published var blurMode: AnnotationBlurMode = .blur
+    @Published var blurIntensity: CGFloat = 14
     @Published var isDirty = false
     @Published var isRendering = false
     @Published var lastMessage: String?
@@ -70,6 +71,8 @@ final class AnnotationDocumentModel: ObservableObject {
     var canUndo: Bool { history.canUndo }
     var canRedo: Bool { history.canRedo }
     var currentTextFontSize: CGFloat { max(18, strokeWidth * 5) }
+    var currentBlurRadius: CGFloat { min(40, max(4, blurIntensity * 1.3)) }
+    var currentPixelScale: CGFloat { min(48, max(6, blurIntensity * 1.6)) }
 
     func apply(_ command: AnnotationCommand) {
         apply(command, direction: .forward)

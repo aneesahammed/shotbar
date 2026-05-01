@@ -146,16 +146,15 @@ enum AnnotationRenderer {
         context.textMatrix = .identity
         let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, layer.fontSize, nil)
         var lineBreak = CTLineBreakMode.byWordWrapping
-        let paragraph = CTParagraphStyleCreate(
-            [
+        let paragraph = withUnsafeBytes(of: &lineBreak) { lineBreakBytes in
+            CTParagraphStyleCreate([
                 CTParagraphStyleSetting(
                     spec: .lineBreakMode,
                     valueSize: MemoryLayout<CTLineBreakMode>.size,
-                    value: &lineBreak
+                    value: lineBreakBytes.baseAddress!
                 )
-            ],
-            1
-        )
+            ], 1)
+        }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: layer.style.color.nsColor,
@@ -205,6 +204,7 @@ enum AnnotationRenderer {
                 .cropped(to: cgRect)
         case .pixelate:
             output = ciImage
+                .clampedToExtent()
                 .applyingFilter("CIPixellate", parameters: [
                     kCIInputScaleKey: max(layer.pixelScale, 4),
                     kCIInputCenterKey: CIVector(x: cgRect.midX, y: cgRect.midY)

@@ -71,8 +71,10 @@ struct AnnotationEditorView: View {
             .keyboardShortcut("s", modifiers: [.command])
             .disabled(model.isRendering)
 
-            Button("Cancel") {
+            Button {
                 onCancel()
+            } label: {
+                Label("Cancel", systemImage: "xmark")
             }
         }
         .padding(.horizontal, 12)
@@ -107,47 +109,10 @@ struct AnnotationEditorView: View {
 
     private var inspector: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Style")
+            Text(inspectorTitle)
                 .font(.headline)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Color")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: paletteColumns, spacing: 8) {
-                    ForEach(AnnotationColor.allCases) { color in
-                        Button {
-                            model.selectedColor = color
-                        } label: {
-                            Circle()
-                                .fill(color.swiftUIColor)
-                                .frame(width: 22, height: 22)
-                                .overlay(
-                                    Circle().stroke(
-                                        Color.primary.opacity(model.selectedColor == color ? 0.9 : 0.25),
-                                        lineWidth: model.selectedColor == color ? 2 : 1
-                                    )
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(color.label)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Stroke \(Int(model.strokeWidth))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Slider(value: $model.strokeWidth, in: 1...24, step: 1)
-            }
-
-            Picker("Blur", selection: $model.blurMode) {
-                ForEach(AnnotationBlurMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            inspectorControls
 
             if let message = model.lastMessage {
                 Text(message)
@@ -159,5 +124,78 @@ struct AnnotationEditorView: View {
         }
         .padding(14)
         .frame(width: 190)
+    }
+
+    private var inspectorTitle: String {
+        switch model.selectedTool {
+        case .arrow, .text:
+            return "Style"
+        case .blur:
+            return "Redaction"
+        case .crop:
+            return "Crop"
+        }
+    }
+
+    @ViewBuilder
+    private var inspectorControls: some View {
+        switch model.selectedTool {
+        case .arrow:
+            colorPicker
+            strokeSlider(title: "Stroke", value: $model.strokeWidth)
+        case .text:
+            colorPicker
+            strokeSlider(title: "Size", value: $model.strokeWidth)
+        case .blur:
+            blurPicker
+            strokeSlider(title: "Intensity", value: $model.blurIntensity)
+        case .crop:
+            EmptyView()
+        }
+    }
+
+    private var colorPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Color")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: paletteColumns, spacing: 8) {
+                ForEach(AnnotationColor.allCases) { color in
+                    Button {
+                        model.selectedColor = color
+                    } label: {
+                        Circle()
+                            .fill(color.swiftUIColor)
+                            .frame(width: 22, height: 22)
+                            .overlay(
+                                Circle().stroke(
+                                    Color.primary.opacity(model.selectedColor == color ? 0.9 : 0.25),
+                                    lineWidth: model.selectedColor == color ? 2 : 1
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(color.label)
+                }
+            }
+        }
+    }
+
+    private var blurPicker: some View {
+        Picker("Mode", selection: $model.blurMode) {
+            ForEach(AnnotationBlurMode.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private func strokeSlider(title: String, value: Binding<CGFloat>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(title) \(Int(value.wrappedValue))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Slider(value: value, in: 1...24, step: 1)
+        }
     }
 }

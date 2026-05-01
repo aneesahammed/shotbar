@@ -82,6 +82,63 @@ final class AnnotationCommandTests: XCTestCase {
         XCTAssertEqual(redoneLayer.rect.origin, CGPoint(x: 4, y: 5))
     }
 
+    func testUpdateLayerUndoRedoEditsTextAnnotation() throws {
+        let asset = try makeAsset()
+        let image = makeImage()
+        let defaults = UserDefaults(suiteName: "ShotBarAppTests.\(UUID().uuidString)")!
+        let prefs = Preferences(defaults: defaults)
+        let model = AnnotationDocumentModel(asset: asset, baseImage: image, prefs: prefs)
+        let style = AnnotationStyle(color: .red, strokeWidth: 4)
+        let original = TextLayer(
+            text: "Original",
+            rect: CGRect(x: 1, y: 1, width: 5, height: 3),
+            style: style,
+            fontSize: 18
+        )
+        var edited = original
+        edited.text = "Edited"
+        edited.fontSize = 24
+
+        model.apply(.addLayer(.text(original)))
+        model.apply(.updateLayer(before: .text(original), after: .text(edited)))
+
+        guard case .text(let editedLayer) = model.document.layers.first else {
+            return XCTFail("Expected a text layer")
+        }
+        XCTAssertEqual(editedLayer.text, "Edited")
+        XCTAssertEqual(editedLayer.fontSize, 24)
+
+        model.undo()
+        guard case .text(let restoredLayer) = model.document.layers.first else {
+            return XCTFail("Expected a text layer")
+        }
+        XCTAssertEqual(restoredLayer.text, "Original")
+        XCTAssertEqual(restoredLayer.fontSize, 18)
+    }
+
+    func testBlurToolUsesConfiguredIntensity() throws {
+        let asset = try makeAsset()
+        let image = makeImage()
+        let defaults = UserDefaults(suiteName: "ShotBarAppTests.\(UUID().uuidString)")!
+        let prefs = Preferences(defaults: defaults)
+        let model = AnnotationDocumentModel(asset: asset, baseImage: image, prefs: prefs)
+        model.blurMode = .pixelate
+        model.blurIntensity = 20
+
+        let command = BlurTool().command(
+            start: CGPoint(x: 1, y: 1),
+            end: CGPoint(x: 9, y: 9),
+            model: model
+        )
+
+        guard case .addLayer(.blur(let layer)) = command else {
+            return XCTFail("Expected a blur add command")
+        }
+        XCTAssertEqual(layer.mode, .pixelate)
+        XCTAssertEqual(layer.radius, model.currentBlurRadius)
+        XCTAssertEqual(layer.pixelScale, model.currentPixelScale)
+    }
+
     private func makeAsset() throws -> CaptureAsset {
         CaptureAsset(
             id: UUID(),

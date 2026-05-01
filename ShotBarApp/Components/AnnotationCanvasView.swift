@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreImage
 
 struct AnnotationCanvasView: NSViewRepresentable {
     @ObservedObject var model: AnnotationDocumentModel
@@ -25,8 +26,10 @@ final class AnnotationCanvasNSView: NSView {
     private var dragCurrentPixel: CGPoint?
     private weak var activeTextView: CommitTextView?
     private var selectedLayerID: UUID?
+    private var editingTextLayerID: UUID?
     private var textMoveDrag: TextMoveDrag?
     private var textResizeDrag: TextResizeDrag?
+    private let ciContext = CIContext(options: nil)
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -51,7 +54,7 @@ final class AnnotationCanvasNSView: NSView {
 
         NSImage(cgImage: model.baseImage, size: model.document.basePixelSize).draw(in: rect)
 
-        for layer in model.document.layers {
+        for layer in model.document.layers where layer.id != editingTextLayerID {
             draw(layer, in: rect)
         }
 
@@ -70,6 +73,13 @@ final class AnnotationCanvasNSView: NSView {
         guard let pixel = pixelPoint(fromViewPoint: point) else { return }
 
         if model.selectedTool == .text {
+            if event.clickCount >= 2,
+               let layer = topmostTextLayer(at: pixel) {
+                selectedLayerID = layer.id
+                beginTextEdit(for: layer)
+                return
+            }
+
             if let selected = selectedTextLayer(),
                let handle = resizeHandle(at: point, for: selected) {
                 textResizeDrag = TextResizeDrag(original: selected, current: selected, handle: handle)
@@ -88,7 +98,7 @@ final class AnnotationCanvasNSView: NSView {
                 return
             }
             selectedLayerID = nil
-            beginTextEdit(at: point, pixel: pixel)
+            beginTextEdit(at: point)
             return
         }
 
@@ -151,7 +161,7 @@ final class AnnotationCanvasNSView: NSView {
             model.apply(.addLayer(layer))
         case .blur:
             guard rect.width > 6, rect.height > 6 else { return }
-            let layer = AnnotationLayer.blur(BlurLayer(rect: rect, mode: model.blurMode, radius: 12, pixelScale: 14))
+            let layer = AnnotationLayer.blur(makeBlurLayer(rect: rect))
             model.apply(.addLayer(layer))
         case .crop:
             guard rect.width > 10, rect.height > 10 else { return }
@@ -193,8 +203,9 @@ final class AnnotationCanvasNSView: NSView {
         super.keyDown(with: event)
     }
 
-    private func beginTextEdit(at viewPoint: CGPoint, pixel: CGPoint) {
+    private func beginTextEdit(at viewPoint: CGPoint) {
         activeTextView?.removeFromSuperview()
+        editingTextLayerID = nil
 
         let imageFrame = imageRect()
         let frame = CGRect(
@@ -203,27 +214,13 @@ final class AnnotationCanvasNSView: NSView {
             width: min(260, max(120, imageFrame.maxX - viewPoint.x)),
             height: max(32, model.currentTextFontSize + 8)
         )
-        let textView = CommitTextView(frame: frame)
-        textView.font = .systemFont(ofSize: model.currentTextFontSize, weight: .semibold)
-        textView.textColor = model.selectedColor.nsColor
-        textView.backgroundColor = .clear
-        textView.drawsBackground = false
-        textView.isRichText = false
-        textView.importsGraphics = false
-        textView.allowsUndo = true
-        textView.textContainerInset = .zero
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.heightTracksTextView = false
-        textView.textContainer?.containerSize = CGSize(width: frame.width, height: .greatestFiniteMagnitude)
-        textView.isHorizontallyResizable = false
-        textView.isVerticallyResizable = true
-        textView.minSize = frame.size
-        textView.maxSize = CGSize(width: max(frame.width, imageFrame.maxX - viewPoint.x), height: .greatestFiniteMagnitude)
-        textView.onTextChanged = { [weak self, weak textView] in
-            guard let self, let textView else { return }
-            self.resizeTextEditor(textView)
-        }
+        let textView = makeTextView(
+            frame: frame,
+            minimumWidth: 120,
+            text: "",
+            viewFontSize: model.currentTextFontSize,
+            color: model.selectedColor.nsColor
+        )
         textView.onCommit = { [weak self, weak textView] text in
             guard let self, let textView else { return }
             self.commitText(
@@ -236,6 +233,81 @@ final class AnnotationCanvasNSView: NSView {
         textView.onCancel = { [weak textView] in
             textView?.removeFromSuperview()
         }
+        installTextView(textView)
+    }
+
+    private func beginTextEdit(for layer: TextLayer) {
+        activeTextView?.removeFromSuperview()
+        editingTextLayerID = layer.id
+
+        let viewRect = viewRect(fromPixelRect: layer.rect, imageRect: imageRect()).standardized
+        let frame = CGRect(
+            x: viewRect.minX,
+            y: viewRect.minY,
+            width: max(120, viewRect.width),
+            height: max(32, viewRect.height)
+        )
+        let textView = makeTextView(
+            frame: frame,
+            minimumWidth: max(120, viewRect.width),
+            text: layer.text,
+            viewFontSize: max(10, viewFontSize(fromPixelFontSize: layer.fontSize)),
+            color: layer.style.color.nsColor
+        )
+        textView.onCommit = { [weak self, weak textView] text in
+            guard let self, let textView else { return }
+            self.commitTextEdit(
+                text,
+                frame: textView.frame,
+                viewFontSize: textView.font?.pointSize ?? self.viewFontSize(fromPixelFontSize: layer.fontSize),
+                original: layer
+            )
+            textView.removeFromSuperview()
+        }
+        textView.onCancel = { [weak self, weak textView] in
+            self?.editingTextLayerID = nil
+            textView?.removeFromSuperview()
+            self?.needsDisplay = true
+        }
+        installTextView(textView)
+        textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
+    }
+
+    private func makeTextView(
+        frame: CGRect,
+        minimumWidth: CGFloat,
+        text: String,
+        viewFontSize: CGFloat,
+        color: NSColor
+    ) -> CommitTextView {
+        let imageFrame = imageRect()
+        let textView = CommitTextView(frame: frame)
+        textView.minimumContentWidth = minimumWidth
+        textView.string = text
+        textView.font = .systemFont(ofSize: viewFontSize, weight: .semibold)
+        textView.textColor = color
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.containerSize = CGSize(width: frame.width, height: .greatestFiniteMagnitude)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.minSize = CGSize(width: minimumWidth, height: frame.height)
+        textView.maxSize = CGSize(width: max(frame.width, imageFrame.maxX - frame.minX), height: .greatestFiniteMagnitude)
+        textView.onTextChanged = { [weak self, weak textView] in
+            guard let self, let textView else { return }
+            self.resizeTextEditor(textView)
+        }
+        return textView
+    }
+
+    private func installTextView(_ textView: CommitTextView) {
         addSubview(textView)
         window?.makeFirstResponder(textView)
         activeTextView = textView
@@ -259,12 +331,39 @@ final class AnnotationCanvasNSView: NSView {
         needsDisplay = true
     }
 
+    private func commitTextEdit(_ text: String, frame: CGRect, viewFontSize: CGFloat, original: TextLayer) {
+        defer {
+            editingTextLayerID = nil
+            needsDisplay = true
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            model.apply(.removeLayer(.text(original)))
+            selectedLayerID = nil
+            return
+        }
+
+        let pixelRect = pixelRect(fromViewRect: frame)
+            .intersection(CGRect(origin: .zero, size: model.document.basePixelSize))
+        guard pixelRect.width > 0, pixelRect.height > 0 else { return }
+
+        var updated = original
+        updated.text = trimmed
+        updated.rect = pixelRect
+        updated.fontSize = pixelFontSize(fromViewFontSize: viewFontSize)
+
+        selectedLayerID = updated.id
+        guard updated != original else { return }
+        model.apply(.updateLayer(before: .text(original), after: .text(updated)))
+    }
+
     private func resizeTextEditor(_ textView: CommitTextView) {
         guard let font = textView.font else { return }
         let imageFrame = imageRect()
         let availableWidth = max(120, imageFrame.maxX - textView.frame.minX)
         let availableHeight = max(32, imageFrame.maxY - textView.frame.minY)
-        let minWidth: CGFloat = 120
+        let minWidth = max(120, textView.minimumContentWidth)
         let text = textView.string.isEmpty ? "Text" : textView.string
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byWordWrapping
@@ -292,7 +391,7 @@ final class AnnotationCanvasNSView: NSView {
         case .text(let text):
             drawText(text, imageRect: imageRect)
         case .blur(let blur):
-            drawBlurPlaceholder(blur, imageRect: imageRect)
+            drawBlurPreview(blur, imageRect: imageRect)
         }
     }
 
@@ -300,9 +399,9 @@ final class AnnotationCanvasNSView: NSView {
         switch model.selectedTool {
         case .arrow:
             let style = AnnotationStyle(color: model.selectedColor, strokeWidth: model.strokeWidth)
-            drawArrow(ArrowLayer(start: start, end: end, style: style, headSize: model.strokeWidth * 5), imageRect: imageRect)
+            drawArrow(ArrowLayer(start: start, end: end, style: style, headSize: 0), imageRect: imageRect)
         case .blur:
-            drawBlurPlaceholder(BlurLayer(rect: normalizedRect(start, end), mode: model.blurMode, radius: 12, pixelScale: 14), imageRect: imageRect)
+            drawBlurPreview(makeBlurLayer(rect: normalizedRect(start, end)), imageRect: imageRect)
         case .crop:
             drawCrop(normalizedRect(start, end), imageRect: imageRect, committed: false)
         case .text:
@@ -389,8 +488,9 @@ final class AnnotationCanvasNSView: NSView {
 
     private func drawText(_ layer: TextLayer, imageRect: CGRect) {
         let rect = viewRect(fromPixelRect: layer.rect, imageRect: imageRect)
+        let fontSize = max(10, layer.fontSize * imageRect.width / model.document.basePixelSize.width)
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: max(10, layer.fontSize * imageRect.width / model.document.basePixelSize.width), weight: .semibold),
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
             .foregroundColor: layer.style.color.nsColor
         ]
         NSAttributedString(string: layer.text, attributes: attrs).draw(in: rect)
@@ -430,8 +530,59 @@ final class AnnotationCanvasNSView: NSView {
         path.stroke()
     }
 
+    private func drawBlurPreview(_ layer: BlurLayer, imageRect: CGRect) {
+        let pixelRect = layer.rect.standardized.intersection(CGRect(origin: .zero, size: model.document.basePixelSize))
+        guard !pixelRect.isEmpty else { return }
+
+        let cgRect = CGRect(
+            x: pixelRect.minX,
+            y: model.document.basePixelSize.height - pixelRect.maxY,
+            width: pixelRect.width,
+            height: pixelRect.height
+        ).integral
+
+        let input = CIImage(cgImage: model.baseImage)
+        let output: CIImage
+        switch layer.mode {
+        case .blur:
+            output = input
+                .clampedToExtent()
+                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: max(layer.radius, 1)])
+                .cropped(to: cgRect)
+        case .pixelate:
+            output = input
+                .clampedToExtent()
+                .applyingFilter("CIPixellate", parameters: [
+                    kCIInputScaleKey: max(layer.pixelScale, 4),
+                    kCIInputCenterKey: CIVector(x: cgRect.midX, y: cgRect.midY)
+                ])
+                .cropped(to: cgRect)
+        }
+
+        guard let processed = ciContext.createCGImage(output, from: cgRect) else {
+            drawBlurPlaceholder(layer, imageRect: imageRect)
+            return
+        }
+
+        let viewRect = viewRect(fromPixelRect: pixelRect, imageRect: imageRect)
+        NSImage(cgImage: processed, size: pixelRect.size).draw(in: viewRect)
+
+        NSColor.controlAccentColor.setStroke()
+        let path = NSBezierPath(rect: viewRect)
+        var dashes: [CGFloat] = [5, 4]
+        path.setLineDash(&dashes, count: dashes.count, phase: 0)
+        path.lineWidth = 1.5
+        path.stroke()
+    }
+
     private func drawCrop(_ crop: CGRect, imageRect: CGRect, committed: Bool) {
         let rect = viewRect(fromPixelRect: crop, imageRect: imageRect)
+        let overlay = NSBezierPath(rect: imageRect)
+        overlay.append(NSBezierPath(rect: rect))
+        overlay.windingRule = .evenOdd
+        NSColor.black.withAlphaComponent(committed ? 0.45 : 0.28).setFill()
+        overlay.fill()
+
         (committed ? NSColor.systemYellow : NSColor.white).setStroke()
         let path = NSBezierPath(rect: rect)
         var dashes: [CGFloat] = [6, 4]
@@ -520,6 +671,15 @@ final class AnnotationCanvasNSView: NSView {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
+    }
+
+    private func makeBlurLayer(rect: CGRect) -> BlurLayer {
+        BlurLayer(
+            rect: rect,
+            mode: model.blurMode,
+            radius: model.currentBlurRadius,
+            pixelScale: model.currentPixelScale
+        )
     }
 
     private func selectedTextLayer() -> TextLayer? {
@@ -704,6 +864,7 @@ private final class CommitTextView: NSTextView {
     var onCommit: ((String) -> Void)?
     var onCancel: (() -> Void)?
     var onTextChanged: (() -> Void)?
+    var minimumContentWidth: CGFloat = 120
     private var didFinish = false
 
     override func didChangeText() {

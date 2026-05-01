@@ -82,6 +82,40 @@ final class AnnotationRendererTests: XCTestCase {
         XCTAssertLessThan(untouchedInsideTextRect.alpha, 0.05, "Text tool should not paint an opaque background")
     }
 
+    func testTextRendererDoesNotAddContrastingOutline() throws {
+        let base = makeTransparentImage(width: 120, height: 60)
+        let document = AnnotationDocument(
+            basePixelSize: CGSize(width: 120, height: 60),
+            pixelsPerPoint: 1,
+            layers: [
+                .text(TextLayer(
+                    text: "Text",
+                    rect: CGRect(x: 8, y: 6, width: 104, height: 48),
+                    style: AnnotationStyle(color: .red, strokeWidth: 10),
+                    fontSize: 34
+                ))
+            ]
+        )
+
+        let rendered = try AnnotationRenderer.render(document: document, baseImage: base)
+        var strongTextPixels = 0
+        var contrastingOutlinePixels = 0
+
+        for y in 0..<rendered.height {
+            for x in 0..<rendered.width {
+                let pixel = samplePixel(in: rendered, x: x, y: y)
+                guard pixel.alpha > 0.6 else { continue }
+                strongTextPixels += 1
+                if pixel.red <= pixel.green + 0.2 || pixel.red <= pixel.blue + 0.2 {
+                    contrastingOutlinePixels += 1
+                }
+            }
+        }
+
+        XCTAssertGreaterThan(strongTextPixels, 0, "Text render should produce visible colored pixels")
+        XCTAssertEqual(contrastingOutlinePixels, 0, "Rendered text should match the typed text color without a white/black outline")
+    }
+
     func testTextRendererWrapsWithinTextRect() throws {
         let base = makeImage(width: 90, height: 70)
         let document = AnnotationDocument(
@@ -266,6 +300,186 @@ final class AnnotationRendererTests: XCTestCase {
         try writePNG(strip, to: dir.appendingPathComponent("comparison_strip_red.png"))
 
         print("Skitch arrow fixtures written to \(dir.path)")
+    }
+
+    /// Renders one fixture per annotation tool (arrow, gaussian blur, pixelate, text,
+    /// crop, plus a combined "kitchen sink"). Saved into the same fixtures directory
+    /// as the arrow fixtures. Lets us visually verify each tool's render path end-to-end.
+    func testGenerateAllToolsFixtures() throws {
+        let caches = try FileManager.default.url(
+            for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        let dir = caches.appendingPathComponent("skitch-arrow-fixtures", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let canvas = CGSize(width: 900, height: 600)
+        let baseImage = makePatternedBackground(width: Int(canvas.width), height: Int(canvas.height))
+
+        // Arrow on patterned bg (verifies shadow + fill against busy content).
+        let arrowDoc = AnnotationDocument(
+            basePixelSize: canvas, pixelsPerPoint: 1,
+            layers: [
+                .arrow(ArrowLayer(
+                    start: CGPoint(x: 120, y: 480),
+                    end: CGPoint(x: 780, y: 140),
+                    style: AnnotationStyle(color: .red, strokeWidth: 14),
+                    headSize: 0
+                ))
+            ]
+        )
+        try writePNG(
+            try AnnotationRenderer.render(document: arrowDoc, baseImage: baseImage),
+            to: dir.appendingPathComponent("tool_arrow_on_patterned_bg.png")
+        )
+
+        // Gaussian blur over the centre — should occlude the underlying pattern.
+        let blurDoc = AnnotationDocument(
+            basePixelSize: canvas, pixelsPerPoint: 1,
+            layers: [
+                .blur(BlurLayer(
+                    rect: CGRect(x: 200, y: 180, width: 500, height: 240),
+                    mode: .blur, radius: 18, pixelScale: 14
+                ))
+            ]
+        )
+        try writePNG(
+            try AnnotationRenderer.render(document: blurDoc, baseImage: baseImage),
+            to: dir.appendingPathComponent("tool_blur_gaussian.png")
+        )
+
+        // Pixelate over the same rectangle for direct comparison.
+        let pixelDoc = AnnotationDocument(
+            basePixelSize: canvas, pixelsPerPoint: 1,
+            layers: [
+                .blur(BlurLayer(
+                    rect: CGRect(x: 200, y: 180, width: 500, height: 240),
+                    mode: .pixelate, radius: 18, pixelScale: 24
+                ))
+            ]
+        )
+        try writePNG(
+            try AnnotationRenderer.render(document: pixelDoc, baseImage: baseImage),
+            to: dir.appendingPathComponent("tool_blur_pixelate.png")
+        )
+
+        // Text annotation — verify wrapping, font size, color binding.
+        let textDoc = AnnotationDocument(
+            basePixelSize: canvas, pixelsPerPoint: 1,
+            layers: [
+                .text(TextLayer(
+                    text: "Hello Skitch — wraps on multiple lines",
+                    rect: CGRect(x: 80, y: 80, width: 360, height: 200),
+                    style: AnnotationStyle(color: .red, strokeWidth: 12),
+                    fontSize: 36
+                )),
+                .text(TextLayer(
+                    text: "small caption",
+                    rect: CGRect(x: 80, y: 320, width: 300, height: 60),
+                    style: AnnotationStyle(color: .blue, strokeWidth: 6),
+                    fontSize: 18
+                )),
+                .text(TextLayer(
+                    text: "BIG",
+                    rect: CGRect(x: 520, y: 320, width: 280, height: 200),
+                    style: AnnotationStyle(color: .pink, strokeWidth: 24),
+                    fontSize: 96
+                ))
+            ]
+        )
+        try writePNG(
+            try AnnotationRenderer.render(document: textDoc, baseImage: baseImage),
+            to: dir.appendingPathComponent("tool_text.png")
+        )
+
+        // Crop — verify it shrinks the output to the requested rect.
+        let cropDoc = AnnotationDocument(
+            basePixelSize: canvas, pixelsPerPoint: 1,
+            layers: [
+                .arrow(ArrowLayer(
+                    start: CGPoint(x: 200, y: 350),
+                    end: CGPoint(x: 700, y: 250),
+                    style: AnnotationStyle(color: .red, strokeWidth: 12),
+                    headSize: 0
+                ))
+            ],
+            crop: CGRect(x: 150, y: 200, width: 600, height: 240)
+        )
+        let cropped = try AnnotationRenderer.render(document: cropDoc, baseImage: baseImage)
+        XCTAssertEqual(cropped.width, 600, "Crop must trim the rendered width")
+        XCTAssertEqual(cropped.height, 240, "Crop must trim the rendered height")
+        try writePNG(cropped, to: dir.appendingPathComponent("tool_crop.png"))
+
+        // Kitchen sink — every tool stacked on one canvas, then cropped.
+        let kitchenDoc = AnnotationDocument(
+            basePixelSize: canvas, pixelsPerPoint: 1,
+            layers: [
+                .blur(BlurLayer(
+                    rect: CGRect(x: 80, y: 60, width: 360, height: 220),
+                    mode: .blur, radius: 14, pixelScale: 14
+                )),
+                .blur(BlurLayer(
+                    rect: CGRect(x: 480, y: 60, width: 340, height: 220),
+                    mode: .pixelate, radius: 12, pixelScale: 22
+                )),
+                .text(TextLayer(
+                    text: "redacted region",
+                    rect: CGRect(x: 100, y: 130, width: 320, height: 60),
+                    style: AnnotationStyle(color: .yellow, strokeWidth: 8),
+                    fontSize: 28
+                )),
+                .arrow(ArrowLayer(
+                    start: CGPoint(x: 120, y: 540),
+                    end: CGPoint(x: 760, y: 360),
+                    style: AnnotationStyle(color: .pink, strokeWidth: 18),
+                    headSize: 0
+                ))
+            ]
+        )
+        try writePNG(
+            try AnnotationRenderer.render(document: kitchenDoc, baseImage: baseImage),
+            to: dir.appendingPathComponent("tool_kitchen_sink.png")
+        )
+
+        print("Multi-tool fixtures written to \(dir.path)")
+    }
+
+    /// Patterned background for blur/pixelate/text fixtures — grey grid + colored stripes.
+    /// Using a recognizable pattern lets us see whether blur is actually applied (the
+    /// stripes should soften) vs. pixelated (stripes become block-mosaic).
+    private func makePatternedBackground(width: Int, height: Int) -> CGImage {
+        let context = CGContext(
+            data: nil,
+            width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        // Diagonal multicolor stripes — provide texture for blur/pixelate to soften.
+        let stripeColors: [CGColor] = [
+            CGColor(red: 0.85, green: 0.20, blue: 0.20, alpha: 1),
+            CGColor(red: 0.20, green: 0.55, blue: 0.85, alpha: 1),
+            CGColor(red: 0.30, green: 0.70, blue: 0.30, alpha: 1),
+            CGColor(red: 0.95, green: 0.65, blue: 0.10, alpha: 1)
+        ]
+        let stripeWidth: CGFloat = 60
+        let total = CGFloat(width + height)
+        var i = 0
+        var x: CGFloat = -CGFloat(height)
+        while x < total {
+            context.setFillColor(stripeColors[i % stripeColors.count])
+            context.move(to: CGPoint(x: x, y: 0))
+            context.addLine(to: CGPoint(x: x + stripeWidth, y: 0))
+            context.addLine(to: CGPoint(x: x + stripeWidth + CGFloat(height), y: CGFloat(height)))
+            context.addLine(to: CGPoint(x: x + CGFloat(height), y: CGFloat(height)))
+            context.closePath()
+            context.fillPath()
+            x += stripeWidth * 2
+            i += 1
+        }
+        return context.makeImage()!
     }
 
     private func makeBackground(width: Int, height: Int) -> CGImage {
