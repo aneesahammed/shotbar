@@ -26,6 +26,7 @@ final class AnnotationCanvasNSView: NSView {
     private weak var activeTextView: CommitTextView?
     private var selectedLayerID: UUID?
     private var textMoveDrag: TextMoveDrag?
+    private var textResizeDrag: TextResizeDrag?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -69,6 +70,13 @@ final class AnnotationCanvasNSView: NSView {
         guard let pixel = pixelPoint(fromViewPoint: point) else { return }
 
         if model.selectedTool == .text {
+            if let selected = selectedTextLayer(),
+               let handle = resizeHandle(at: point, for: selected) {
+                textResizeDrag = TextResizeDrag(original: selected, current: selected, handle: handle)
+                needsDisplay = true
+                return
+            }
+
             if let layer = topmostTextLayer(at: pixel) {
                 selectedLayerID = layer.id
                 textMoveDrag = TextMoveDrag(
@@ -91,6 +99,12 @@ final class AnnotationCanvasNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if textResizeDrag != nil {
+            let point = convert(event.locationInWindow, from: nil)
+            resizeActiveText(to: point)
+            return
+        }
+
         if textMoveDrag != nil {
             let point = convert(event.locationInWindow, from: nil)
             moveActiveText(to: point)
@@ -104,6 +118,11 @@ final class AnnotationCanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if textResizeDrag != nil {
+            finishTextResize()
+            return
+        }
+
         if textMoveDrag != nil {
             finishTextMove()
             return
@@ -154,6 +173,17 @@ final class AnnotationCanvasNSView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "z" {
+            if event.modifierFlags.contains(.shift) {
+                model.redo()
+            } else {
+                model.undo()
+            }
+            needsDisplay = true
+            return
+        }
+
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "0" {
             zoomScale = 1
             panOffset = .zero
@@ -196,7 +226,11 @@ final class AnnotationCanvasNSView: NSView {
         }
         textView.onCommit = { [weak self, weak textView] text in
             guard let self, let textView else { return }
-            self.commitText(text, frame: textView.frame)
+            self.commitText(
+                text,
+                frame: textView.frame,
+                viewFontSize: textView.font?.pointSize ?? self.model.currentTextFontSize
+            )
             textView.removeFromSuperview()
         }
         textView.onCancel = { [weak textView] in
@@ -208,14 +242,20 @@ final class AnnotationCanvasNSView: NSView {
         resizeTextEditor(textView)
     }
 
-    private func commitText(_ text: String, frame: CGRect) {
+    private func commitText(_ text: String, frame: CGRect, viewFontSize: CGFloat) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let pixelRect = pixelRect(fromViewRect: frame)
             .intersection(CGRect(origin: .zero, size: model.document.basePixelSize))
         let style = AnnotationStyle(color: model.selectedColor, strokeWidth: model.strokeWidth)
-        let layer = AnnotationLayer.text(TextLayer(text: trimmed, rect: pixelRect, style: style, fontSize: model.currentTextFontSize))
+        let layer = AnnotationLayer.text(TextLayer(
+            text: trimmed,
+            rect: pixelRect,
+            style: style,
+            fontSize: pixelFontSize(fromViewFontSize: viewFontSize)
+        ))
         model.apply(.addLayer(layer))
+        selectedLayerID = layer.id
         needsDisplay = true
     }
 
@@ -356,17 +396,26 @@ final class AnnotationCanvasNSView: NSView {
         NSAttributedString(string: layer.text, attributes: attrs).draw(in: rect)
 
         if selectedLayerID == layer.id {
-            drawSelectionRect(rect)
+            drawTextSelection(rect)
         }
     }
 
-    private func drawSelectionRect(_ rect: CGRect) {
+    private func drawTextSelection(_ rect: CGRect) {
         let path = NSBezierPath(rect: rect.insetBy(dx: -4, dy: -3))
         var dashes: [CGFloat] = [5, 3]
         NSColor.controlAccentColor.setStroke()
         path.lineWidth = 1.5
         path.setLineDash(&dashes, count: dashes.count, phase: 0)
         path.stroke()
+
+        for handleRect in resizeHandleRects(for: rect).values {
+            let handle = NSBezierPath(roundedRect: handleRect, xRadius: 2, yRadius: 2)
+            NSColor.controlAccentColor.setFill()
+            handle.fill()
+            NSColor.white.withAlphaComponent(0.95).setStroke()
+            handle.lineWidth = 1
+            handle.stroke()
+        }
     }
 
     private func drawBlurPlaceholder(_ layer: BlurLayer, imageRect: CGRect) {
@@ -426,6 +475,18 @@ final class AnnotationCanvasNSView: NSView {
         )
     }
 
+    private func imageDisplayScale() -> CGFloat {
+        imageRect().width / max(model.document.basePixelSize.width, 1)
+    }
+
+    private func pixelFontSize(fromViewFontSize viewFontSize: CGFloat) -> CGFloat {
+        viewFontSize / max(imageDisplayScale(), 0.001)
+    }
+
+    private func viewFontSize(fromPixelFontSize pixelFontSize: CGFloat) -> CGFloat {
+        pixelFontSize * imageDisplayScale()
+    }
+
     private func pixelRect(fromViewRect viewRect: CGRect) -> CGRect {
         let rect = imageRect()
         guard rect.width > 0, rect.height > 0 else { return .zero }
@@ -459,6 +520,15 @@ final class AnnotationCanvasNSView: NSView {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
+    }
+
+    private func selectedTextLayer() -> TextLayer? {
+        guard let selectedLayerID else { return nil }
+        for layer in model.document.layers {
+            guard case .text(let text) = layer, text.id == selectedLayerID else { continue }
+            return text
+        }
+        return nil
     }
 
     private func topmostTextLayer(at pixel: CGPoint) -> TextLayer? {
@@ -502,6 +572,69 @@ final class AnnotationCanvasNSView: NSView {
         model.apply(.updateLayer(before: .text(drag.original), after: .text(drag.current)))
     }
 
+    private func resizeActiveText(to viewPoint: CGPoint) {
+        guard var drag = textResizeDrag,
+              let pixel = clampedPixelPoint(fromViewPoint: viewPoint) else { return }
+
+        let updated = resizedTextLayer(drag.original, to: pixel, handle: drag.handle)
+        drag.current = updated
+        textResizeDrag = drag
+        model.replaceLayerForPreview(.text(updated))
+        needsDisplay = true
+    }
+
+    private func finishTextResize() {
+        guard let drag = textResizeDrag else { return }
+        defer {
+            textResizeDrag = nil
+            needsDisplay = true
+        }
+
+        guard drag.original.rect != drag.current.rect || drag.original.fontSize != drag.current.fontSize else { return }
+        model.apply(.updateLayer(before: .text(drag.original), after: .text(drag.current)))
+    }
+
+    private func resizedTextLayer(_ original: TextLayer, to pixel: CGPoint, handle: TextResizeHandle) -> TextLayer {
+        let bounds = CGRect(origin: .zero, size: model.document.basePixelSize)
+        let originalRect = original.rect.standardized
+        let minViewSize = CGSize(width: 42, height: 22)
+        let scale = max(imageDisplayScale(), 0.001)
+        let minSize = CGSize(width: minViewSize.width / scale, height: minViewSize.height / scale)
+        let clamped = CGPoint(
+            x: min(max(pixel.x, bounds.minX), bounds.maxX),
+            y: min(max(pixel.y, bounds.minY), bounds.maxY)
+        )
+
+        var rect: CGRect
+        switch handle {
+        case .topLeft:
+            let x = min(max(clamped.x, bounds.minX), originalRect.maxX - minSize.width)
+            let y = min(max(clamped.y, bounds.minY), originalRect.maxY - minSize.height)
+            rect = CGRect(x: x, y: y, width: originalRect.maxX - x, height: originalRect.maxY - y)
+        case .topRight:
+            let maxX = max(min(clamped.x, bounds.maxX), originalRect.minX + minSize.width)
+            let y = min(max(clamped.y, bounds.minY), originalRect.maxY - minSize.height)
+            rect = CGRect(x: originalRect.minX, y: y, width: maxX - originalRect.minX, height: originalRect.maxY - y)
+        case .bottomLeft:
+            let x = min(max(clamped.x, bounds.minX), originalRect.maxX - minSize.width)
+            let maxY = max(min(clamped.y, bounds.maxY), originalRect.minY + minSize.height)
+            rect = CGRect(x: x, y: originalRect.minY, width: originalRect.maxX - x, height: maxY - originalRect.minY)
+        case .bottomRight:
+            let maxX = max(min(clamped.x, bounds.maxX), originalRect.minX + minSize.width)
+            let maxY = max(min(clamped.y, bounds.maxY), originalRect.minY + minSize.height)
+            rect = CGRect(x: originalRect.minX, y: originalRect.minY, width: maxX - originalRect.minX, height: maxY - originalRect.minY)
+        }
+
+        var updated = original
+        updated.rect = rect.integral
+        let originalDisplayHeight = max(originalRect.height * scale, minViewSize.height)
+        let newDisplayHeight = max(rect.height * scale, minViewSize.height)
+        let viewFontSize = viewFontSize(fromPixelFontSize: original.fontSize)
+        let scaledViewFontSize = min(180, max(8, viewFontSize * (newDisplayHeight / originalDisplayHeight)))
+        updated.fontSize = pixelFontSize(fromViewFontSize: scaledViewFontSize)
+        return updated
+    }
+
     private func boundedTextRect(_ rect: CGRect, origin: CGPoint) -> CGRect {
         let size = model.document.basePixelSize
         let standardized = rect.standardized
@@ -512,12 +645,44 @@ final class AnnotationCanvasNSView: NSView {
             height: standardized.height
         )
     }
+
+    private func resizeHandle(at point: CGPoint, for text: TextLayer) -> TextResizeHandle? {
+        let viewRect = viewRect(fromPixelRect: text.rect, imageRect: imageRect())
+        let handles = resizeHandleRects(for: viewRect)
+        return TextResizeHandle.allCases.first { handle in
+            handles[handle]?.insetBy(dx: -4, dy: -4).contains(point) == true
+        }
+    }
+
+    private func resizeHandleRects(for rect: CGRect) -> [TextResizeHandle: CGRect] {
+        let size: CGFloat = 8
+        let half = size / 2
+        return [
+            .topLeft: CGRect(x: rect.minX - half, y: rect.minY - half, width: size, height: size),
+            .topRight: CGRect(x: rect.maxX - half, y: rect.minY - half, width: size, height: size),
+            .bottomLeft: CGRect(x: rect.minX - half, y: rect.maxY - half, width: size, height: size),
+            .bottomRight: CGRect(x: rect.maxX - half, y: rect.maxY - half, width: size, height: size)
+        ]
+    }
 }
 
 private struct TextMoveDrag {
     var original: TextLayer
     var current: TextLayer
     var grabOffset: CGPoint
+}
+
+private struct TextResizeDrag {
+    var original: TextLayer
+    var current: TextLayer
+    var handle: TextResizeHandle
+}
+
+private enum TextResizeHandle: CaseIterable {
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
 }
 
 private extension NSBezierPath {
