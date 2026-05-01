@@ -4,8 +4,12 @@ struct ArrowTool: AnnotationTool {
     let kind: AnnotationToolKind = .arrow
 
     func command(start: CGPoint, end: CGPoint, model: AnnotationDocumentModel) -> AnnotationCommand? {
-        guard hypot(start.x - end.x, start.y - end.y) > 4 else { return nil }
+        // ArrowGeometry is the single source of truth for "renderable arrow"; if it can't
+        // build a geometry from these inputs, neither renderer will draw anything, so we
+        // must not commit a layer (avoids invisible entries in undo history).
+        guard ArrowGeometry(start: start, end: end, strokeWidth: model.strokeWidth) != nil else { return nil }
         let style = AnnotationStyle(color: model.selectedColor, strokeWidth: model.strokeWidth)
-        return .addLayer(.arrow(ArrowLayer(start: start, end: end, style: style, headSize: model.strokeWidth * 5)))
+        // headSize is deprecated and ignored at render time; see ArrowLayer.headSize.
+        return .addLayer(.arrow(ArrowLayer(start: start, end: end, style: style, headSize: 0)))
     }
 }

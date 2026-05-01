@@ -96,8 +96,14 @@ final class AnnotationCanvasNSView: NSView {
 
         switch model.selectedTool {
         case .arrow:
+            // Use ArrowGeometry as the single source of truth for "is this drag a renderable
+            // arrow?" — the mouse-up `distance > 4` gate above is looser than the renderer's
+            // `max(stroke*2, 8)` reject threshold, so without this check a 5-7pt drag at
+            // stroke 8 would commit a layer that both renderers silently no-op, leaving an
+            // invisible entry in undo history.
+            guard ArrowGeometry(start: start, end: end, strokeWidth: model.strokeWidth) != nil else { return }
             let style = AnnotationStyle(color: model.selectedColor, strokeWidth: model.strokeWidth)
-            let layer = AnnotationLayer.arrow(ArrowLayer(start: start, end: end, style: style, headSize: model.strokeWidth * 5))
+            let layer = AnnotationLayer.arrow(ArrowLayer(start: start, end: end, style: style, headSize: 0))
             model.apply(.addLayer(layer))
         case .blur:
             guard rect.width > 6, rect.height > 6 else { return }
@@ -191,28 +197,84 @@ final class AnnotationCanvasNSView: NSView {
         }
     }
 
+    /// Skitch-style arrow rendered into the live editor canvas.
+    /// Mirrors `AnnotationRenderer.drawArrow` — the only differences are AppKit's
+    /// `NSBezierPath` API and the flipped-view shadow offset (+y is down here).
+    /// Stroke width is multiplied by `imageScale` so what the user sees during drawing
+    /// matches what `AnnotationRenderer` produces when the document is exported.
     private func drawArrow(_ layer: ArrowLayer, imageRect: CGRect) {
         let start = viewPoint(fromPixelPoint: layer.start, imageRect: imageRect)
         let end = viewPoint(fromPixelPoint: layer.end, imageRect: imageRect)
-        let path = NSBezierPath()
-        path.move(to: start)
-        path.line(to: end)
-        path.lineWidth = max(layer.style.strokeWidth, 1)
-        layer.style.color.nsColor.setStroke()
-        path.lineCapStyle = .round
-        path.stroke()
+        let imageScale = imageRect.width / model.document.basePixelSize.width
+        let displayStroke = max(layer.style.strokeWidth * imageScale, 1)
+        guard let geom = ArrowGeometry(start: start, end: end, strokeWidth: displayStroke) else { return }
 
-        let angle = atan2(end.y - start.y, end.x - start.x)
-        let head = max(layer.headSize * imageRect.width / model.document.basePixelSize.width, 8)
-        let left = CGPoint(x: end.x - head * cos(angle - .pi / 6), y: end.y - head * sin(angle - .pi / 6))
-        let right = CGPoint(x: end.x - head * cos(angle + .pi / 6), y: end.y - head * sin(angle + .pi / 6))
-        let headPath = NSBezierPath()
-        headPath.move(to: end)
-        headPath.line(to: left)
-        headPath.line(to: right)
-        headPath.close()
-        layer.style.color.nsColor.setFill()
-        headPath.fill()
+        let color = layer.style.color.nsColor
+        // 0.80 alpha matches AnnotationRenderer's halo so the live preview is faithful
+        // to the exported pixels.
+        let halo = NSColor.black.withAlphaComponent(0.80)
+        let haloStroke = displayStroke + 3
+
+        guard let cgContext = NSGraphicsContext.current?.cgContext else { return }
+
+        // PASS 1 — halo silhouette + single composited drop shadow via transparency layer.
+        // isFlipped == true → +y points down, so offset.height = +2 puts shadow visually below.
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowOffset = NSSize(width: 0, height: 2)
+        shadow.shadowBlurRadius = 4
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        shadow.set()
+        cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
+        drawArrowSilhouette(geom: geom, lineWidth: haloStroke, color: halo)
+        cgContext.endTransparencyLayer()
+        NSGraphicsContext.restoreGraphicsState()
+
+        // PASS 2 — colored shaft (no shadow; lives on top of the halo).
+        NSGraphicsContext.saveGraphicsState()
+        let shaft = NSBezierPath()
+        shaft.move(to: geom.start)
+        shaft.line(to: geom.shaftEnd)
+        shaft.lineWidth = displayStroke
+        shaft.lineCapStyle = .round
+        shaft.lineJoinStyle = .round
+        color.setStroke()
+        shaft.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+
+        // PASS 3 — colored arrowhead fill.
+        NSGraphicsContext.saveGraphicsState()
+        let head = NSBezierPath()
+        head.move(to: geom.tip)
+        head.line(to: geom.leftBase)
+        head.line(to: geom.rightBase)
+        head.close()
+        color.setFill()
+        head.fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// Renders the unified arrow silhouette as a single shape.
+    /// Wraps its own state save/restore so callers don't need to.
+    private func drawArrowSilhouette(geom: ArrowGeometry, lineWidth: CGFloat, color: NSColor) {
+        NSGraphicsContext.saveGraphicsState()
+        let shaft = NSBezierPath()
+        shaft.move(to: geom.start)
+        shaft.line(to: geom.shaftEnd)
+        shaft.lineWidth = lineWidth
+        shaft.lineCapStyle = .round
+        shaft.lineJoinStyle = .round
+        color.setStroke()
+        shaft.stroke()
+
+        let head = NSBezierPath()
+        head.move(to: geom.tip)
+        head.line(to: geom.leftBase)
+        head.line(to: geom.rightBase)
+        head.close()
+        color.setFill()
+        head.fill()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawText(_ layer: TextLayer, imageRect: CGRect) {

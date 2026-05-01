@@ -6,6 +6,14 @@ struct AnnotationEditorView: View {
     let onCopy: () async -> Void
     let onCancel: () -> Void
 
+    // `.adaptive(minimum:)` packs as many ~32pt swatch slots as the inspector width allows
+    // and reflows to a 2-row layout when the inspector is narrow (current default 190pt).
+    // Resilient to future inspector resizing or localization-driven layout shifts that
+    // a fixed 4-column grid would not handle gracefully.
+    private let paletteColumns: [GridItem] = [
+        GridItem(.adaptive(minimum: 28, maximum: 40), spacing: 8, alignment: .center)
+    ]
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -106,15 +114,20 @@ struct AnnotationEditorView: View {
                 Text("Color")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                HStack {
+                LazyVGrid(columns: paletteColumns, spacing: 8) {
                     ForEach(AnnotationColor.allCases) { color in
                         Button {
                             model.selectedColor = color
                         } label: {
                             Circle()
                                 .fill(color.swiftUIColor)
-                                .frame(width: 20, height: 20)
-                                .overlay(Circle().stroke(Color.primary.opacity(model.selectedColor == color ? 0.9 : 0.25), lineWidth: model.selectedColor == color ? 2 : 1))
+                                .frame(width: 22, height: 22)
+                                .overlay(
+                                    Circle().stroke(
+                                        Color.primary.opacity(model.selectedColor == color ? 0.9 : 0.25),
+                                        lineWidth: model.selectedColor == color ? 2 : 1
+                                    )
+                                )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(color.label)

@@ -62,34 +62,78 @@ enum AnnotationRenderer {
         return rendered
     }
 
+    /// Skitch-style arrow: dark halo + crisp colored fill + single composited drop shadow.
+    ///
+    /// Pass 1 wraps the halo silhouette in a transparency layer so the entire arrow shape
+    /// casts ONE drop shadow, not three stacked shadow blobs that would muddy the edges.
+    /// Passes 2 and 3 then paint the colored shaft and head crisply on top with no shadow.
     private static func drawArrow(_ layer: ArrowLayer, in context: CGContext, canvasHeight: CGFloat) {
         let start = CGPoint(x: layer.start.x, y: canvasHeight - layer.start.y)
         let end = CGPoint(x: layer.end.x, y: canvasHeight - layer.end.y)
-        let color = layer.style.color.nsColor.cgColor
         let stroke = max(layer.style.strokeWidth, 1)
+        guard let geom = ArrowGeometry(start: start, end: end, strokeWidth: stroke) else { return }
 
+        let color = layer.style.color.nsColor.cgColor
+        // 0.80 alpha is dark enough to read against busy photo backgrounds without going
+        // fully opaque (which would look like a stencil instead of a tasteful halo).
+        let halo = NSColor.black.withAlphaComponent(0.80).cgColor
+        let haloStroke = stroke + 3
+
+        // PASS 1 — halo silhouette + single composited drop shadow.
+        // Default CGContext y-axis is up, so offset.height = -2 puts the shadow visually below.
+        context.saveGState()
+        context.setShadow(
+            offset: CGSize(width: 0, height: -2),
+            blur: 4,
+            color: NSColor.black.withAlphaComponent(0.5).cgColor
+        )
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        drawArrowSilhouette(geom: geom, lineWidth: haloStroke, color: halo, in: context)
+        context.endTransparencyLayer()
+        context.restoreGState()
+
+        // PASS 2 — colored shaft (no shadow; lives entirely on top of the halo).
+        context.saveGState()
+        context.setStrokeColor(color)
+        context.setLineWidth(stroke)
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.move(to: geom.start)
+        context.addLine(to: geom.shaftEnd)
+        context.strokePath()
+        context.restoreGState()
+
+        // PASS 3 — colored arrowhead fill.
+        context.saveGState()
+        context.setFillColor(color)
+        context.move(to: geom.tip)
+        context.addLine(to: geom.leftBase)
+        context.addLine(to: geom.rightBase)
+        context.closePath()
+        context.fillPath()
+        context.restoreGState()
+    }
+
+    /// Renders the unified arrow silhouette (thick stroked shaft + filled triangle) as a
+    /// single shape. Wraps its own state save/restore so callers don't have to.
+    private static func drawArrowSilhouette(
+        geom: ArrowGeometry,
+        lineWidth: CGFloat,
+        color: CGColor,
+        in context: CGContext
+    ) {
         context.saveGState()
         context.setStrokeColor(color)
         context.setFillColor(color)
-        context.setLineWidth(stroke)
+        context.setLineWidth(lineWidth)
         context.setLineCap(.round)
-        context.move(to: start)
-        context.addLine(to: end)
+        context.setLineJoin(.round)
+        context.move(to: geom.start)
+        context.addLine(to: geom.shaftEnd)
         context.strokePath()
-
-        let angle = atan2(end.y - start.y, end.x - start.x)
-        let head = max(layer.headSize, stroke * 4)
-        let left = CGPoint(
-            x: end.x - head * cos(angle - .pi / 6),
-            y: end.y - head * sin(angle - .pi / 6)
-        )
-        let right = CGPoint(
-            x: end.x - head * cos(angle + .pi / 6),
-            y: end.y - head * sin(angle + .pi / 6)
-        )
-        context.move(to: end)
-        context.addLine(to: left)
-        context.addLine(to: right)
+        context.move(to: geom.tip)
+        context.addLine(to: geom.leftBase)
+        context.addLine(to: geom.rightBase)
         context.closePath()
         context.fillPath()
         context.restoreGState()

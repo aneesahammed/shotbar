@@ -8,6 +8,8 @@ extension AnnotationColor {
         case .yellow: return .systemYellow
         case .green: return .systemGreen
         case .blue: return .systemBlue
+        case .pink: return .systemPink
+        case .orange: return .systemOrange
         case .white: return .white
         case .black: return .black
         }

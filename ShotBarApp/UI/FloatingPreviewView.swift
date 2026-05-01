@@ -15,15 +15,16 @@ struct FloatingPreviewView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let batch, let selectedAsset {
-                thumbnailStrip(batch: batch, selectedAsset: selectedAsset)
-                statusLine(for: selectedAsset, total: batch.assets.count)
-                actionRow(batch: batch, asset: selectedAsset)
-            }
+        // ViewThatFits picks the first child whose intrinsic size fits the available space.
+        // For default text sizes the fixed-VStack layout always wins; only when an extreme
+        // accessibility text size or a localized label pushes content past the panel cap
+        // does the ScrollView fallback engage. The panel's screen-frame clamp upstream
+        // guarantees there is *some* available space to scroll within.
+        ViewThatFits(in: .vertical) {
+            content
+            ScrollView(.vertical, showsIndicators: false) { content }
         }
-        .padding(12)
-        .frame(width: 340)
+        .frame(minWidth: 340, idealWidth: 340, maxWidth: 380)
         .background(backgroundView)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
@@ -34,6 +35,18 @@ struct FloatingPreviewView: View {
             selectedAssetID = batch?.assets.first?.id
             NSAccessibility.post(element: NSApp as Any, notification: .layoutChanged)
         }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let batch, let selectedAsset {
+                thumbnailStrip(batch: batch, selectedAsset: selectedAsset)
+                statusLine(for: selectedAsset, total: batch.assets.count)
+                actionRow(batch: batch, asset: selectedAsset)
+            }
+        }
+        .padding(12)
     }
 
     private var backgroundView: some View {
@@ -148,8 +161,13 @@ private struct PreviewButton: View {
                 Text(title)
                     .font(.caption2)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .frame(minWidth: 46)
+            // maxWidth: .infinity lets the buttons share the HStack width evenly,
+            // preventing localized labels (e.g. "Mostrar en Finder") from breaking the row.
+            // minHeight gives a stable click target across icon-only/text-only states.
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .accessibilityLabel(title)

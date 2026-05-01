@@ -24,12 +24,15 @@ enum AnnotationLayer: Codable, Equatable, Identifiable {
     var bounds: CGRect {
         switch self {
         case .arrow(let layer):
+            // Pad for arrowhead (stroke * 4), halo (+3pt), and shadow blur (4pt) so dirty
+            // rects fully cover the new Skitch-style render footprint.
+            let padding = layer.style.strokeWidth * 4 + 12
             return CGRect(
                 x: min(layer.start.x, layer.end.x),
                 y: min(layer.start.y, layer.end.y),
                 width: abs(layer.start.x - layer.end.x),
                 height: abs(layer.start.y - layer.end.y)
-            ).insetBy(dx: -layer.style.strokeWidth * 4, dy: -layer.style.strokeWidth * 4)
+            ).insetBy(dx: -padding, dy: -padding)
         case .text(let layer):
             return layer.rect
         case .blur(let layer):
@@ -48,6 +51,9 @@ struct ArrowLayer: Codable, Equatable {
     var start: CGPoint
     var end: CGPoint
     var style: AnnotationStyle
+    /// Deprecated. Head dimensions are now derived from `style.strokeWidth` at render time
+    /// via `ArrowGeometry`. Field is retained for `Codable` compatibility with previously
+    /// persisted documents and ignored by both renderers.
     var headSize: CGFloat
 }
 

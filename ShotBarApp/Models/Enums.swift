@@ -72,7 +72,7 @@ enum AnnotationToolKind: String, Codable, CaseIterable, Identifiable {
 }
 
 enum AnnotationColor: String, Codable, CaseIterable, Identifiable {
-    case red, yellow, green, blue, white, black
+    case red, yellow, green, blue, pink, orange, white, black
     var id: String { rawValue }
 
     var label: String {

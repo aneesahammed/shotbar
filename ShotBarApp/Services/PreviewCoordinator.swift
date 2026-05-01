@@ -26,12 +26,16 @@ final class PreviewCoordinator: ObservableObject {
     func present(_ batch: CaptureBatch) {
         activeBatch = batch
 
-        let size = NSSize(width: 340, height: batch.assets.count > 1 ? 184 : 174)
-        let panel = self.panel ?? FloatingPreviewPanel(size: size)
+        // The placeholder size is overridden once `setContent` measures the SwiftUI
+        // hosting view's `fittingSize` and resizes the panel to fit. Positioning then
+        // uses the post-measure size so corner placement is always accurate, regardless
+        // of asset count, label length, or accessibility text scaling.
+        let placeholder = NSSize(width: 380, height: 240)
+        let panel = self.panel ?? FloatingPreviewPanel(size: placeholder)
         self.panel = panel
         panel.setContent(FloatingPreviewView(coordinator: self))
 
-        let frame = frameForPanel(size: size, batch: batch)
+        let frame = frameForPanel(size: panel.frame.size, batch: batch)
         panel.show(at: frame, duration: prefs.previewDuration) { [weak self] in
             self?.activeBatch = nil
             self?.panel = nil

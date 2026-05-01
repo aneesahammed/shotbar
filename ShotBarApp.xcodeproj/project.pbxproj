@@ -6,9 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		6A1111112E80000100000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4F7C13BD2E46B1AC0070BCB2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4F7C13C42E46B1AC0070BCB2;
+			remoteInfo = ShotBarApp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		4F7C13C52E46B1AC0070BCB2 /* ShotBarApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ShotBarApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		4F7C13C82E46B1AC0070BCB2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		6A1111112E80000100000001 /* ShotBarAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShotBarAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -62,16 +71,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
-
-/* Begin PBXContainerItemProxy section */
-		6A1111112E80000100000007 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 4F7C13BD2E46B1AC0070BCB2 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 4F7C13C42E46B1AC0070BCB2;
-			remoteInfo = ShotBarApp;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXNativeTarget section */
 		4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */ = {
@@ -128,16 +127,16 @@
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
-					TargetAttributes = {
-						4F7C13C42E46B1AC0070BCB2 = {
-							CreatedOnToolsVersion = 16.4;
-						};
-						6A1111112E80000100000006 = {
-							CreatedOnToolsVersion = 16.4;
-							TestTargetID = 4F7C13C42E46B1AC0070BCB2;
-						};
+				TargetAttributes = {
+					4F7C13C42E46B1AC0070BCB2 = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					6A1111112E80000100000006 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 4F7C13C42E46B1AC0070BCB2;
 					};
 				};
+			};
 			buildConfigurationList = 4F7C13C02E46B1AC0070BCB2 /* Build configuration list for PBXProject "ShotBarApp" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -151,11 +150,11 @@
 			productRefGroup = 4F7C13C62E46B1AC0070BCB2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-				targets = (
-					4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */,
-					6A1111112E80000100000006 /* ShotBarAppTests */,
-				);
-			};
+			targets = (
+				4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */,
+				6A1111112E80000100000006 /* ShotBarAppTests */,
+			);
+		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */

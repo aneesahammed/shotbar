@@ -15,7 +15,7 @@ final class Preferences: ObservableObject, UserDefaultsSavable {
     @Published var previewCorner: PreviewCorner = .bottomRight { didSet { persistIfLoaded() } }
     @Published var previewScreenChoice: PreviewScreenChoice = .cursorScreen { didSet { persistIfLoaded() } }
     @Published var annotationDefaultColor: AnnotationColor = .red { didSet { persistIfLoaded() } }
-    @Published var annotationDefaultStrokeWidth: CGFloat = 4 { didSet { persistIfLoaded() } }
+    @Published var annotationDefaultStrokeWidth: CGFloat = 8 { didSet { persistIfLoaded() } }
     
     private let defaults: UserDefaults
     private var isLoading = true
