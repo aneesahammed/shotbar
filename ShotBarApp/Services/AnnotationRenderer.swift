@@ -139,20 +139,47 @@ enum AnnotationRenderer {
 
     private static func drawText(_ layer: TextLayer, in context: CGContext, canvasHeight: CGFloat) {
         guard !layer.text.isEmpty else { return }
+        let rect = layer.rect.standardized
+        guard rect.width > 0, rect.height > 0 else { return }
+
         context.saveGState()
         context.textMatrix = .identity
         let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, layer.fontSize, nil)
+        var lineBreak = CTLineBreakMode.byWordWrapping
+        let paragraph = CTParagraphStyleCreate(
+            [
+                CTParagraphStyleSetting(
+                    spec: .lineBreakMode,
+                    valueSize: MemoryLayout<CTLineBreakMode>.size,
+                    value: &lineBreak
+                )
+            ],
+            1
+        )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: layer.style.color.nsColor
+            .foregroundColor: layer.style.color.nsColor,
+            .paragraphStyle: paragraph
         ]
         let attributed = NSAttributedString(string: layer.text, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributed)
-        context.textPosition = CGPoint(
-            x: layer.rect.minX,
-            y: canvasHeight - layer.rect.minY - layer.fontSize
+
+        let path = CGMutablePath()
+        path.addRect(
+            CGRect(
+                x: rect.minX,
+                y: canvasHeight - rect.maxY,
+                width: rect.width,
+                height: rect.height
+            )
         )
-        CTLineDraw(line, context)
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        let frame = CTFramesetterCreateFrame(
+            framesetter,
+            CFRange(location: 0, length: attributed.length),
+            path,
+            nil
+        )
+        CTFrameDraw(frame, context)
         context.restoreGState()
     }
 
@@ -185,11 +212,13 @@ enum AnnotationRenderer {
                 .cropped(to: cgRect)
         }
 
-        guard let output else { return }
         let ciContext = CIContext(options: nil)
+        guard let output,
+              let processed = ciContext.createCGImage(output, from: cgRect) else { return }
+
         context.saveGState()
         context.clip(to: cgRect)
-        ciContext.draw(output, in: cgRect, from: cgRect)
+        context.draw(processed, in: cgRect)
         context.restoreGState()
     }
 }

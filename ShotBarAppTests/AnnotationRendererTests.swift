@@ -21,6 +21,88 @@ final class AnnotationRendererTests: XCTestCase {
         XCTAssertEqual(rendered.height, 8)
     }
 
+    func testRendererAppliesBlurInsideRectOnly() throws {
+        let base = makeVerticalSplitImage(width: 40, height: 40)
+        let document = AnnotationDocument(
+            basePixelSize: CGSize(width: 40, height: 40),
+            pixelsPerPoint: 1,
+            layers: [
+                .blur(BlurLayer(rect: CGRect(x: 16, y: 8, width: 8, height: 24), mode: .blur, radius: 5, pixelScale: 8))
+            ]
+        )
+
+        let rendered = try AnnotationRenderer.render(document: document, baseImage: base)
+        let blurredBoundary = samplePixel(in: rendered, x: 20, y: 20)
+        let outsideLeft = samplePixel(in: rendered, x: 5, y: 20)
+        let outsideRight = samplePixel(in: rendered, x: 35, y: 20)
+
+        XCTAssertGreaterThan(blurredBoundary.red, 0.05, "Blurred split boundary should no longer be pure black")
+        XCTAssertLessThan(blurredBoundary.red, 0.95, "Blurred split boundary should no longer be pure white")
+        XCTAssertLessThan(outsideLeft.red, 0.05, "Blur should not leak outside the selected rectangle")
+        XCTAssertGreaterThan(outsideRight.red, 0.95, "Blur should not leak outside the selected rectangle")
+    }
+
+    func testRendererAppliesPixelateInsideRect() throws {
+        let base = makeCheckerboardImage(width: 40, height: 40)
+        let document = AnnotationDocument(
+            basePixelSize: CGSize(width: 40, height: 40),
+            pixelsPerPoint: 1,
+            layers: [
+                .blur(BlurLayer(rect: CGRect(x: 0, y: 0, width: 40, height: 40), mode: .pixelate, radius: 5, pixelScale: 8))
+            ]
+        )
+
+        let rendered = try AnnotationRenderer.render(document: document, baseImage: base)
+        let first = samplePixel(in: rendered, x: 18, y: 20)
+        let second = samplePixel(in: rendered, x: 19, y: 20)
+
+        XCTAssertLessThan(abs(first.red - second.red), 0.02, "Adjacent pixels in one pixelated cell should be flattened")
+        XCTAssertLessThan(abs(first.green - second.green), 0.02, "Adjacent pixels in one pixelated cell should be flattened")
+        XCTAssertLessThan(abs(first.blue - second.blue), 0.02, "Adjacent pixels in one pixelated cell should be flattened")
+    }
+
+    func testTextRendererDoesNotFillTextRectBackground() throws {
+        let base = makeTransparentImage(width: 80, height: 40)
+        let document = AnnotationDocument(
+            basePixelSize: CGSize(width: 80, height: 40),
+            pixelsPerPoint: 1,
+            layers: [
+                .text(TextLayer(
+                    text: "Hi",
+                    rect: CGRect(x: 4, y: 4, width: 72, height: 28),
+                    style: AnnotationStyle(color: .red, strokeWidth: 4),
+                    fontSize: 18
+                ))
+            ]
+        )
+
+        let rendered = try AnnotationRenderer.render(document: document, baseImage: base)
+        let untouchedInsideTextRect = samplePixel(in: rendered, x: 72, y: 12)
+
+        XCTAssertLessThan(untouchedInsideTextRect.alpha, 0.05, "Text tool should not paint an opaque background")
+    }
+
+    func testTextRendererWrapsWithinTextRect() throws {
+        let base = makeImage(width: 90, height: 70)
+        let document = AnnotationDocument(
+            basePixelSize: CGSize(width: 90, height: 70),
+            pixelsPerPoint: 1,
+            layers: [
+                .text(TextLayer(
+                    text: "Wrap Wrap Wrap Wrap",
+                    rect: CGRect(x: 6, y: 4, width: 50, height: 58),
+                    style: AnnotationStyle(color: .black, strokeWidth: 4),
+                    fontSize: 16
+                ))
+            ]
+        )
+
+        let rendered = try AnnotationRenderer.render(document: document, baseImage: base)
+        let lowerLinePixels = countNonWhitePixels(in: rendered, rect: CGRect(x: 6, y: 28, width: 50, height: 30))
+
+        XCTAssertGreaterThan(lowerLinePixels, 0, "Long text should wrap inside its annotation rect instead of rendering as one clipped line")
+    }
+
     /// Arrows shorter than `max(strokeWidth * 2, 8)` are silently no-oped by the geometry
     /// helper. The renderer must produce an image identical to the base (allowing for
     /// color-space round-trip): no crash, no partial render.
@@ -229,6 +311,66 @@ final class AnnotationRendererTests: XCTestCase {
         return context.makeImage()!
     }
 
+    private func makeVerticalSplitImage(width: Int, height: Int) -> CGImage {
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width / 2, height: height))
+        return context.makeImage()!
+    }
+
+    private func makeTransparentImage(width: Int, height: Int) -> CGImage {
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
+    }
+
+    private func makeCheckerboardImage(width: Int, height: Int) -> CGImage {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let value: UInt8 = (x + y).isMultiple(of: 2) ? 0 : 255
+                pixels[offset] = value
+                pixels[offset + 1] = value
+                pixels[offset + 2] = value
+                pixels[offset + 3] = 255
+            }
+        }
+
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )!
+    }
+
     /// Reads a single normalized RGBA pixel from a CGImage. Coordinates are in image
     /// pixels with origin at the *top-left* (matching how a user reads the image).
     private func samplePixel(in image: CGImage, x: Int, y: Int) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
@@ -254,5 +396,21 @@ final class AnnotationRendererTests: XCTestCase {
             blue: CGFloat(pixel[2]) / 255,
             alpha: CGFloat(pixel[3]) / 255
         )
+    }
+
+    private func countNonWhitePixels(in image: CGImage, rect: CGRect) -> Int {
+        let bounded = rect.integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !bounded.isEmpty else { return 0 }
+
+        var count = 0
+        for y in Int(bounded.minY)..<Int(bounded.maxY) {
+            for x in Int(bounded.minX)..<Int(bounded.maxX) {
+                let pixel = samplePixel(in: image, x: x, y: y)
+                if pixel.red < 0.95 || pixel.green < 0.95 || pixel.blue < 0.95 {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
 }

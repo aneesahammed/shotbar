@@ -141,13 +141,34 @@ final class AnnotationCanvasNSView: NSView {
     private func beginTextEdit(at viewPoint: CGPoint, pixel: CGPoint) {
         activeTextView?.removeFromSuperview()
 
-        let frame = CGRect(x: viewPoint.x, y: viewPoint.y, width: 220, height: 36)
+        let imageFrame = imageRect()
+        let frame = CGRect(
+            x: viewPoint.x,
+            y: viewPoint.y,
+            width: min(260, max(120, imageFrame.maxX - viewPoint.x)),
+            height: max(32, model.currentTextFontSize + 8)
+        )
         let textView = CommitTextView(frame: frame)
-        textView.font = .systemFont(ofSize: 18, weight: .semibold)
+        textView.font = .systemFont(ofSize: model.currentTextFontSize, weight: .semibold)
         textView.textColor = model.selectedColor.nsColor
-        textView.backgroundColor = .textBackgroundColor
-        textView.drawsBackground = true
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
         textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.containerSize = CGSize(width: frame.width, height: .greatestFiniteMagnitude)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.minSize = frame.size
+        textView.maxSize = CGSize(width: max(frame.width, imageFrame.maxX - viewPoint.x), height: .greatestFiniteMagnitude)
+        textView.onTextChanged = { [weak self, weak textView] in
+            guard let self, let textView else { return }
+            self.resizeTextEditor(textView)
+        }
         textView.onCommit = { [weak self, weak textView] text in
             guard let self, let textView else { return }
             self.commitText(text, frame: textView.frame)
@@ -159,6 +180,7 @@ final class AnnotationCanvasNSView: NSView {
         addSubview(textView)
         window?.makeFirstResponder(textView)
         activeTextView = textView
+        resizeTextEditor(textView)
     }
 
     private func commitText(_ text: String, frame: CGRect) {
@@ -167,9 +189,35 @@ final class AnnotationCanvasNSView: NSView {
         let pixelRect = pixelRect(fromViewRect: frame)
             .intersection(CGRect(origin: .zero, size: model.document.basePixelSize))
         let style = AnnotationStyle(color: model.selectedColor, strokeWidth: model.strokeWidth)
-        let layer = AnnotationLayer.text(TextLayer(text: trimmed, rect: pixelRect, style: style, fontSize: max(18, model.strokeWidth * 5)))
+        let layer = AnnotationLayer.text(TextLayer(text: trimmed, rect: pixelRect, style: style, fontSize: model.currentTextFontSize))
         model.apply(.addLayer(layer))
         needsDisplay = true
+    }
+
+    private func resizeTextEditor(_ textView: CommitTextView) {
+        guard let font = textView.font else { return }
+        let imageFrame = imageRect()
+        let availableWidth = max(120, imageFrame.maxX - textView.frame.minX)
+        let availableHeight = max(32, imageFrame.maxY - textView.frame.minY)
+        let minWidth: CGFloat = 120
+        let text = textView.string.isEmpty ? "Text" : textView.string
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        let measured = (text as NSString).boundingRect(
+            with: CGSize(width: availableWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [
+                .font: font,
+                .paragraphStyle: paragraph
+            ]
+        )
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let size = CGSize(
+            width: min(availableWidth, max(minWidth, ceil(measured.width) + 4)),
+            height: min(availableHeight, max(lineHeight + 4, ceil(measured.height) + 4))
+        )
+        textView.frame.size = size
+        textView.textContainer?.containerSize = CGSize(width: size.width, height: .greatestFiniteMagnitude)
     }
 
     private func draw(_ layer: AnnotationLayer, in imageRect: CGRect) {
@@ -383,7 +431,13 @@ private extension NSBezierPath {
 private final class CommitTextView: NSTextView {
     var onCommit: ((String) -> Void)?
     var onCancel: (() -> Void)?
+    var onTextChanged: (() -> Void)?
     private var didFinish = false
+
+    override func didChangeText() {
+        super.didChangeText()
+        onTextChanged?()
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {

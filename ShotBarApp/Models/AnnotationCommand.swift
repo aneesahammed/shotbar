@@ -69,6 +69,7 @@ final class AnnotationDocumentModel: ObservableObject {
 
     var canUndo: Bool { history.canUndo }
     var canRedo: Bool { history.canRedo }
+    var currentTextFontSize: CGFloat { max(18, strokeWidth * 5) }
 
     func apply(_ command: AnnotationCommand) {
         apply(command, direction: .forward)
