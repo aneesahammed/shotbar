@@ -58,6 +58,10 @@ Documents/Shared Playground Data/
 !.env.example
 !.env.sample
 
+# Local agent instructions
+AGENTS.md
+CLAUDE.md
+
 # Secrets & signing credentials
 *.p8
 *.p12
