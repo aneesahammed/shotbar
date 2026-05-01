@@ -10,13 +10,17 @@ final class CaptureStore: ObservableObject {
     private let cacheRoot: URL
     private var editorRetainCounts: [UUID: Int] = [:]
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, cacheRoot: URL? = nil) {
         self.fileManager = fileManager
-        let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? fileManager.temporaryDirectory
-        self.cacheRoot = caches
-            .appendingPathComponent("ShotBarApp", isDirectory: true)
-            .appendingPathComponent("Captures", isDirectory: true)
+        if let cacheRoot {
+            self.cacheRoot = cacheRoot
+        } else {
+            let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+                ?? fileManager.temporaryDirectory
+            self.cacheRoot = caches
+                .appendingPathComponent(AppConstants.CacheDirectories.app, isDirectory: true)
+                .appendingPathComponent(AppConstants.CacheDirectories.captures, isDirectory: true)
+        }
         purgeStaleCacheOnLaunch()
     }
 

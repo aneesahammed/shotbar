@@ -12,13 +12,26 @@ final class ImagePersistenceService: ImagePersisting {
     private let toast = Toast()
     private let prefs: Preferences
     private let fileManager: FileManager
+    private let saveDirectoryOverride: URL?
+    private let pasteboard: NSPasteboard
 
-    init(prefs: Preferences, fileManager: FileManager = .default) {
+    init(
+        prefs: Preferences,
+        fileManager: FileManager = .default,
+        saveDirectory: URL? = nil,
+        pasteboard: NSPasteboard = .general
+    ) {
         self.prefs = prefs
         self.fileManager = fileManager
+        self.saveDirectoryOverride = saveDirectory
+        self.pasteboard = pasteboard
     }
 
     var defaultSaveDirectory: URL {
+        if let saveDirectoryOverride {
+            try? fileManager.createDirectory(at: saveDirectoryOverride, withIntermediateDirectories: true, attributes: nil)
+            return saveDirectoryOverride
+        }
         let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
         try? fileManager.createDirectory(at: documentsURL, withIntermediateDirectories: true, attributes: nil)
@@ -45,7 +58,6 @@ final class ImagePersistenceService: ImagePersisting {
         }
 
         let result = await MainActor.run {
-            let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             guard pasteboard.setData(pngData, forType: .png) else {
                 return PersistenceResult.failed("Could not copy screenshot to clipboard")
@@ -95,19 +107,11 @@ final class ImagePersistenceService: ImagePersisting {
     }
 
     func nextAvailableURL(in directory: URL, baseName: String, extension ext: String) -> URL {
-        var candidate = directory.appendingPathComponent(baseName).appendingPathExtension(ext)
-        var counter = 2
-        while fileManager.fileExists(atPath: candidate.path) {
-            candidate = directory
-                .appendingPathComponent("\(baseName) (\(counter))")
-                .appendingPathExtension(ext)
-            counter += 1
-        }
-        return candidate
+        FileNaming.nextAvailableURL(in: directory, baseName: baseName, extension: ext, fileManager: fileManager)
     }
 
     private func saveImageFile(_ image: CGImage, metadata: RenderedImageMetadata, options: SaveOptions) throws -> URL {
-        let ext = options.format == .png ? AppConstants.FileExtensions.png : AppConstants.FileExtensions.jpg
+        let ext = options.format.fileExtension
         let directory = defaultSaveDirectory
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
         let baseName = options.suffix.isEmpty ? options.baseName : "\(options.baseName) \(options.suffix)"

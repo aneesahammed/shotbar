@@ -10,6 +10,9 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
     private var onComplete: ((CGRect?, NSScreen?) -> Void)?
     
     private static var activeOverlays: [SelectionOverlay] = []
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
     
     static func present(onComplete: @escaping (CGRect?, NSScreen?) -> Void) {
         activeOverlays = NSScreen.screens.map { screen in

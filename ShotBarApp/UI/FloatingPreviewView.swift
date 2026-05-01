@@ -75,9 +75,13 @@ struct FloatingPreviewView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(asset.id == selectedAsset.id ? Color.accentColor : Color.clear, lineWidth: 2)
                         )
+                        .onDrag {
+                            coordinator.dragItemProvider(for: asset)
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Captured \(asset.kind.rawValue)")
+                .accessibilityHint("Drag to export as a file")
             }
             Spacer(minLength: 0)
             Button {

@@ -17,6 +17,7 @@ struct AppConstants {
     static let previewNotchExtraInset: CGFloat = 8
     static let editorMinSize = CGSize(width: 800, height: 600)
     static let editorUndoDepth = 50
+    static let dragExportRetention: TimeInterval = 24 * 60 * 60
     
     // Default Hotkeys
     static let defaultSelectionHotkey = UInt32(kVK_F1)
@@ -43,5 +44,13 @@ struct AppConstants {
     struct FileExtensions {
         static let png = "png"
         static let jpg = "jpg"
+    }
+
+    // Cache Directories
+    struct CacheDirectories {
+        static let app = "ShotBarApp"
+        static let captures = "Captures"
+        static let dragExports = "DragExports"
+        static let dragStaging = ".Staging"
     }
 }

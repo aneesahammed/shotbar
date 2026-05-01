@@ -21,9 +21,22 @@
 		6A1111112E80000100000001 /* ShotBarAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShotBarAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D42E90000100000001 /* Exceptions for "ShotBarApp" folder in "ShotBarApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		4F7C13C72E46B1AC0070BCB2 /* ShotBarApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D42E90000100000001 /* Exceptions for "ShotBarApp" folder in "ShotBarApp" target */,
+			);
 			path = ShotBarApp;
 			sourceTree = "<group>";
 		};

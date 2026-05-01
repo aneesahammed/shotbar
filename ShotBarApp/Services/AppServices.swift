@@ -12,6 +12,7 @@ final class AppServices {
     let hotkeys: HotkeyManager
     let persistence: ImagePersistenceService
     let captureStore: CaptureStore
+    let dragExporter: DragExportService
     let editor: EditorCoordinator
     let preview: PreviewCoordinator
     let shots: ScreenshotManager
@@ -24,8 +25,15 @@ final class AppServices {
         self.hotkeys = HotkeyManager()
         self.persistence = ImagePersistenceService(prefs: prefs)
         self.captureStore = CaptureStore()
+        self.dragExporter = DragExportService()
         self.editor = EditorCoordinator(prefs: prefs, persistence: persistence, store: captureStore)
-        self.preview = PreviewCoordinator(prefs: prefs, store: captureStore, persistence: persistence, editor: editor)
+        self.preview = PreviewCoordinator(
+            prefs: prefs,
+            store: captureStore,
+            persistence: persistence,
+            editor: editor,
+            dragExporter: dragExporter
+        )
         self.shots = ScreenshotManager(
             prefs: prefs,
             persistence: persistence,
@@ -42,6 +50,7 @@ final class AppServices {
             .store(in: &cs)
         
         // Initial setup
+        dragExporter.cleanupOldDragFilesAsync()
         shots.refreshSaveDirectory()
         rebindHotkeys()
     }

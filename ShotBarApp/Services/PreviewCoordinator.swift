@@ -9,14 +9,22 @@ final class PreviewCoordinator: ObservableObject {
     private let store: CaptureStore
     private let persistence: ImagePersistenceService
     private let editor: EditorCoordinator
+    private let dragExporter: DragExporting
     private var panel: FloatingPreviewPanel?
     private var cancellables = Set<AnyCancellable>()
 
-    init(prefs: Preferences, store: CaptureStore, persistence: ImagePersistenceService, editor: EditorCoordinator) {
+    init(
+        prefs: Preferences,
+        store: CaptureStore,
+        persistence: ImagePersistenceService,
+        editor: EditorCoordinator,
+        dragExporter: DragExporting
+    ) {
         self.prefs = prefs
         self.store = store
         self.persistence = persistence
         self.editor = editor
+        self.dragExporter = dragExporter
 
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .sink { [weak self] _ in self?.repositionPanel() }
@@ -115,6 +123,12 @@ final class PreviewCoordinator: ObservableObject {
 
     func edit(_ asset: CaptureAsset) {
         editor.open(asset)
+    }
+
+    func dragItemProvider(for asset: CaptureAsset) -> NSItemProvider {
+        dragExporter.itemProvider(for: asset, format: prefs.imageFormat) { [weak self] error in
+            self?.persistence.show(text: "Drag export failed: \(error.localizedDescription)", kind: .error)
+        }
     }
 
     func discard() {
