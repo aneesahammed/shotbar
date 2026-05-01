@@ -13,6 +13,9 @@ final class ScreenshotManager: ObservableObject {
     @Published var saveDirectory: URL?
     private let toast = Toast()
     private let prefs: Preferences
+    private let persistence: ImagePersistenceService
+    private let captureStore: CaptureStore
+    private let previewCoordinator: PreviewCoordinator
 
     // Persist capture scale (pixels-per-point) for accurate clipboard DPI/size
     private var lastCapturePixelsPerPoint: CGFloat = 1.0
@@ -20,30 +23,37 @@ final class ScreenshotManager: ObservableObject {
     // Add property to store the previous active application
     private var previousActiveApp: NSRunningApplication?
 
-    init(prefs: Preferences) {
+    init(
+        prefs: Preferences,
+        persistence: ImagePersistenceService,
+        captureStore: CaptureStore,
+        previewCoordinator: PreviewCoordinator
+    ) {
         self.prefs = prefs
+        self.persistence = persistence
+        self.captureStore = captureStore
+        self.previewCoordinator = previewCoordinator
     }
 
     // MARK: Save location
 
     func refreshSaveDirectory() {
         // Use the app's sandboxed Documents directory and surface it through Reveal Save Folder.
-        let documentsDir = appDocumentsDirectory()
+        let documentsDir = persistence.defaultSaveDirectory
         saveDirectory = documentsDir
         print("Save directory set to: \(documentsDir.path)")
     }
 
+    @MainActor
     func revealSaveLocationInFinder() {
-        // Always reveal the app's Documents directory where screenshots are saved
-        let dir = appDocumentsDirectory()
-        NSWorkspace.shared.activateFileViewerSelecting([dir])
+        persistence.revealSaveDirectory()
         // Hide the menu bar popover after revealing folder
         hideMenuBarPopover()
     }
 
     // MARK: Entry points
 
-    func captureSelection() {
+    func captureSelection(bypassPreview: Bool = false) {
         Task { @MainActor in
             // Dismiss the popover BEFORE the overlay appears so the popover
             // doesn't occlude the content the user is trying to select.
@@ -55,7 +65,13 @@ final class ScreenshotManager: ObservableObject {
                         // Allow the overlay windows to fully dismiss before capturing
                         try? await Task.sleep(nanoseconds: 150_000_000)
                         let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
-                        self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
+                        await self.handleSingleCapture(
+                            cgImage: cg,
+                            kind: .selection,
+                            suffix: "Selection",
+                            originScreenID: self.screenID(for: screen),
+                            bypassPreview: bypassPreview
+                        )
                     } catch {
                         self.toast.show(text: "Selection failed: \(error.localizedDescription)", kind: .error)
                     }
@@ -70,7 +86,7 @@ final class ScreenshotManager: ObservableObject {
         previousActiveApp = NSWorkspace.shared.frontmostApplication
     }
 
-    func captureActiveWindow() {
+    func captureActiveWindow(bypassPreview: Bool = false) {
         Task { @MainActor in
             do {
                 // First, try to get the previously stored active application
@@ -144,7 +160,14 @@ final class ScreenshotManager: ObservableObject {
                     }
                 }
 
-                self.saveAccordingToPreferences(cgImage: capturedImage, suffix: "Window")
+                let originScreen = NSScreen.screens.first(where: { $0.frame.intersects(targetWindow.frame) }) ?? NSScreen.main
+                await self.handleSingleCapture(
+                    cgImage: capturedImage,
+                    kind: .window,
+                    suffix: "Window",
+                    originScreenID: originScreen.flatMap { self.screenID(for: $0) },
+                    bypassPreview: bypassPreview
+                )
 
             } catch {
                 self.toast.show(text: "Window capture failed: \(error.localizedDescription)", kind: .error)
@@ -152,7 +175,7 @@ final class ScreenshotManager: ObservableObject {
         }
     }
 
-    func captureFullScreens() {
+    func captureFullScreens(bypassPreview: Bool = false) {
         Task { @MainActor in
             do {
                 // Dismiss the popover BEFORE capturing the screen, otherwise
@@ -165,7 +188,7 @@ final class ScreenshotManager: ObservableObject {
                     self.toast.show(text: "No displays", kind: .error)
                     return
                 }
-                var saved = 0
+                var assets: [CaptureAsset] = []
                 for (i, d) in displays.enumerated() {
                     let filter = SCContentFilter(display: d, excludingWindows: [])
                     let config = SCStreamConfiguration()
@@ -182,11 +205,20 @@ final class ScreenshotManager: ObservableObject {
                     config.scalesToFit = false
 
                     let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                    self.saveAccordingToPreferences(cgImage: cg, suffix: suffix)
-                    saved += 1
+                    let asset = try await self.captureStore.makeAsset(
+                        from: cg,
+                        kind: displays.count > 1 ? .display : .screen,
+                        suffix: suffix,
+                        pixelsPerPoint: max(px.scale.width, px.scale.height, 1.0),
+                        originScreenID: d.displayID
+                    )
+                    assets.append(asset)
                 }
-                if saved == 0 {
+                if assets.isEmpty {
                     self.toast.show(text: "Full screen capture failed", kind: .error)
+                } else {
+                    self.playShutterSoundIfEnabled()
+                    await self.handleCapturedBatch(CaptureBatch(assets: assets), bypassPreview: bypassPreview)
                 }
             } catch {
                 self.toast.show(text: "Full screen failed: \(error.localizedDescription)", kind: .error)
@@ -287,6 +319,12 @@ final class ScreenshotManager: ObservableObject {
         }
     }
 
+    private func screenID(for screen: NSScreen) -> CGDirectDisplayID? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map {
+            CGDirectDisplayID($0.uint32Value)
+        }
+    }
+
     private func displayPixelSize(for display: SCDisplay, screen: NSScreen?, preferredScale: CGFloat? = nil) -> (width: Int, height: Int, scale: CGSize) {
         guard let screen else {
             let fallbackScale = preferredScale.flatMap { $0 > 0 ? $0 : nil } ?? 1
@@ -336,108 +374,97 @@ final class ScreenshotManager: ObservableObject {
 
     // MARK: Saving
 
-    private struct SaveRequest {
-        let cgImage: CGImage
-        let suffix: String
-        let destination: Destination
-        let imageFormat: ImageFormat
-        let saveDirectory: URL
-        let pixelsPerPoint: CGFloat
-    }
-
-    private enum SaveResult {
-        case copied
-        case saved(URL)
-        case failed(String)
-    }
-
-    private func saveAccordingToPreferences(cgImage: CGImage, suffix: String) {
-        let request = SaveRequest(
-            cgImage: cgImage,
-            suffix: suffix,
-            destination: prefs.destination,
-            imageFormat: prefs.imageFormat,
-            saveDirectory: saveDirectory ?? appDocumentsDirectory(),
-            pixelsPerPoint: max(lastCapturePixelsPerPoint, 1.0)
-        )
-
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            let result = self.performSave(request)
-            await MainActor.run {
-                self.presentSaveResult(result)
-            }
-        }
-    }
-
-    private func performSave(_ request: SaveRequest) -> SaveResult {
+    @MainActor
+    private func handleSingleCapture(
+        cgImage: CGImage,
+        kind: CaptureKind,
+        suffix: String,
+        originScreenID: CGDirectDisplayID?,
+        bypassPreview: Bool
+    ) async {
         do {
-            switch request.destination {
-            case .clipboard:
-                try copyToClipboard(cgImage: request.cgImage, pixelsPerPoint: request.pixelsPerPoint)
-                return .copied
-            case .file:
-                let url = try saveImageFile(request)
-                return .saved(url)
-            }
+            let asset = try await captureStore.makeAsset(
+                from: cgImage,
+                kind: kind,
+                suffix: suffix,
+                pixelsPerPoint: max(lastCapturePixelsPerPoint, 1.0),
+                originScreenID: originScreenID
+            )
+            playShutterSoundIfEnabled()
+            await handleCapturedBatch(CaptureBatch(assets: [asset]), bypassPreview: bypassPreview)
         } catch {
-            print("Screenshot save failed: \(error)")
-            return .failed(userFacingSaveError(for: error))
+            toast.show(text: "Capture cache failed: \(error.localizedDescription)", kind: .error)
         }
     }
 
     @MainActor
-    private func presentSaveResult(_ result: SaveResult) {
-        switch result {
-        case .copied:
-            toast.show(text: "Screenshot copied to clipboard", kind: .success)
-            playShutterSoundIfEnabled()
-        case .saved(let url):
-            toast.show(text: "Saved \(url.lastPathComponent)", kind: .success)
-            playShutterSoundIfEnabled()
-        case .failed(let message):
-            toast.show(text: message, kind: .error)
+    private func handleCapturedBatch(_ inputBatch: CaptureBatch, bypassPreview: Bool) async {
+        var batch = inputBatch
+        batch = await persistInitialOutput(for: batch)
+
+        if prefs.previewEnabled, !bypassPreview {
+            captureStore.insert(batch)
+            previewCoordinator.present(batch)
+        } else {
+            batch.assets.forEach { captureStore.purgeUnretained($0) }
         }
     }
 
-    private func copyToClipboard(cgImage: CGImage, pixelsPerPoint: CGFloat) throws {
-        let dpi = 72.0 * Double(max(pixelsPerPoint, 1.0))
-        guard let pngData = createHighQualityPNGData(from: cgImage, dpi: dpi) else {
-            throw NSError(domain: "ShotBar", code: -30, userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot for clipboard"])
+    @MainActor
+    private func persistInitialOutput(for inputBatch: CaptureBatch) async -> CaptureBatch {
+        var batch = inputBatch
+        switch prefs.destination {
+        case .clipboard:
+            guard let index = preferredClipboardAssetIndex(in: batch) else { return batch }
+            var asset = batch.assets[index]
+            let result = await persistence.copy(asset)
+            asset.initialResult = result
+            batch.assets[index] = asset
+        case .file:
+            var savedCount = 0
+            var failure: String?
+            for index in batch.assets.indices {
+                var asset = batch.assets[index]
+                let result = await persistence.save(
+                    asset,
+                    options: SaveOptions(
+                        baseName: asset.baseName,
+                        suffix: "",
+                        format: prefs.imageFormat,
+                        showToast: batch.assets.count == 1,
+                        playSound: false
+                    )
+                )
+                asset.initialResult = result
+                if let url = result.savedURL {
+                    asset.originalSavedURL = url
+                    savedCount += 1
+                } else if let message = result.failureMessage {
+                    failure = message
+                }
+                batch.assets[index] = asset
+            }
+            if batch.assets.count > 1 {
+                if savedCount == batch.assets.count {
+                    persistence.show(text: "Saved \(savedCount) screenshots", kind: .success)
+                } else if let failure {
+                    persistence.show(text: failure, kind: .error)
+                }
+            }
         }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        guard pasteboard.setData(pngData, forType: .png) else {
-            throw NSError(domain: "ShotBar", code: -31, userInfo: [NSLocalizedDescriptionKey: "Could not copy screenshot to clipboard"])
-        }
+        return batch
     }
 
-    private func createHighQualityPNGData(from cgImage: CGImage, dpi: Double? = nil) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
-            return nil
+    private func preferredClipboardAssetIndex(in batch: CaptureBatch) -> Int? {
+        guard !batch.assets.isEmpty else { return nil }
+        let cursorScreenID = NSScreen.screens
+            .first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+            .flatMap { screenID(for: $0) }
+        if let cursorScreenID,
+           let index = batch.assets.firstIndex(where: { $0.originScreenID == cursorScreenID }) {
+            return index
         }
-
-        // Use high-quality PNG properties; include DPI when available
-        var props: [CFString: Any] = [
-            kCGImagePropertyPNGCompressionFilter: 0,
-            kCGImageDestinationEmbedThumbnail: false
-        ]
-        if let dpi {
-            props[kCGImagePropertyDPIWidth] = dpi
-            props[kCGImagePropertyDPIHeight] = dpi
-            // PNG doesn't have a DPI unit key; consumers assume inches
-        }
-        props[kCGImagePropertyColorModel] = kCGImagePropertyColorModelRGB
-
-        CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
-
-        guard CGImageDestinationFinalize(destination) else {
-            return nil
-        }
-
-        return data as Data
+        return batch.assets.startIndex
     }
 
     // MARK: - Heuristics
@@ -473,94 +500,6 @@ final class ScreenshotManager: ObservableObject {
         }
         let fraction = Double(nonBlackCount) / Double(maxSamples)
         return fraction < 0.01
-    }
-
-    private func saveImageFile(_ request: SaveRequest) throws -> URL {
-        let ext = request.imageFormat == .png ? "png" : "jpg"
-        try FileManager.default.createDirectory(at: request.saveDirectory, withIntermediateDirectories: true, attributes: nil)
-
-        let url = nextAvailableURL(
-            in: request.saveDirectory,
-            baseName: filename(suffix: request.suffix),
-            extension: ext
-        )
-        let dpi = 72.0 * Double(max(request.pixelsPerPoint, 1.0))
-
-        switch request.imageFormat {
-        case .png:
-            try savePNG(cgImage: request.cgImage, to: url, dpi: dpi)
-        case .jpg:
-            try saveJPG(cgImage: request.cgImage, to: url, quality: 1.0, dpi: dpi)
-        }
-
-        return url
-    }
-
-    private func filename(suffix: String) -> String {
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        return "Screenshot \(df.string(from: Date())) \(suffix)"
-    }
-
-    private func nextAvailableURL(in directory: URL, baseName: String, extension ext: String) -> URL {
-        var candidate = directory.appendingPathComponent(baseName).appendingPathExtension(ext)
-        var counter = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = directory
-                .appendingPathComponent("\(baseName) (\(counter))")
-                .appendingPathExtension(ext)
-            counter += 1
-        }
-        return candidate
-    }
-
-    private func userFacingSaveError(for error: Error) -> String {
-        let nsError = error as NSError
-        if nsError.domain == "ShotBar" {
-            return nsError.localizedDescription
-        }
-        return "Save failed. Check the save folder permissions."
-    }
-
-    private func savePNG(cgImage: CGImage, to url: URL, dpi: Double) throws {
-        let uti = UTType.png.identifier as CFString
-        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
-            throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
-        }
-
-        // Add image metadata and properties for better quality
-        let props: [CFString: Any] = [
-            kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
-            kCGImageDestinationEmbedThumbnail: false,
-            kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
-            kCGImagePropertyDPIWidth: dpi,
-            kCGImagePropertyDPIHeight: dpi
-        ]
-        CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
-        if !CGImageDestinationFinalize(dest) {
-            throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
-        }
-    }
-
-    private func saveJPG(cgImage: CGImage, to url: URL, quality: Double, dpi: Double) throws {
-        let uti = UTType.jpeg.identifier as CFString
-        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
-            throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
-        }
-
-        // Enhanced JPEG properties for better quality
-        let props: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: quality,
-            kCGImageDestinationEmbedThumbnail: false,
-            kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
-            kCGImagePropertyOrientation: 1,
-            kCGImagePropertyDPIWidth: dpi,
-            kCGImagePropertyDPIHeight: dpi
-        ]
-        CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
-        if !CGImageDestinationFinalize(dest) {
-            throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
-        }
     }
 
     private func playShutterSoundIfEnabled() {

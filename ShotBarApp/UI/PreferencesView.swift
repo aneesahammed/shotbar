@@ -3,11 +3,11 @@ import SwiftUI
 // MARK: - Preferences UI
 struct PreferencesView_Previews: PreviewProvider {
     static var previews: some View {
-        let prefs = Preferences()
+        let services = AppServices.shared
         PreferencesView(
-            prefs: prefs,
-            shots: ScreenshotManager(prefs: prefs),
-            hotkeys: HotkeyManager()
+            prefs: services.prefs,
+            shots: services.shots,
+            hotkeys: services.hotkeys
         )
         .frame(width: 400, height: 300)
     }
@@ -42,6 +42,46 @@ struct PreferencesView: View {
                 }
                 Text("If captures fail, grant permissions in System Settings → Privacy.")
                     .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            Section("Preview") {
+                Toggle("Show floating preview", isOn: $prefs.previewEnabled)
+                HStack {
+                    Text("Duration")
+                    Slider(
+                        value: $prefs.previewDuration,
+                        in: AppConstants.previewMinDuration...AppConstants.previewMaxDuration,
+                        step: 1
+                    )
+                    Text("\(Int(prefs.previewDuration))s")
+                        .monospacedDigit()
+                        .frame(width: 32, alignment: .trailing)
+                }
+                Picker("Corner", selection: $prefs.previewCorner) {
+                    ForEach(PreviewCorner.allCases) { corner in
+                        Text(corner.label).tag(corner)
+                    }
+                }
+                Picker("Screen", selection: $prefs.previewScreenChoice) {
+                    ForEach(PreviewScreenChoice.allCases) { choice in
+                        Text(choice.label).tag(choice)
+                    }
+                }
+            }
+
+            Section("Annotation") {
+                Picker("Default color", selection: $prefs.annotationDefaultColor) {
+                    ForEach(AnnotationColor.allCases) { color in
+                        Text(color.label).tag(color)
+                    }
+                }
+                HStack {
+                    Text("Stroke")
+                    Slider(value: $prefs.annotationDefaultStrokeWidth, in: 1...24, step: 1)
+                    Text("\(Int(prefs.annotationDefaultStrokeWidth))")
+                        .monospacedDigit()
+                        .frame(width: 28, alignment: .trailing)
+                }
             }
 
 

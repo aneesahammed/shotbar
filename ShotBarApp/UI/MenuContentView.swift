@@ -6,6 +6,8 @@ struct MenuContentView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
     @ObservedObject var hotkeys: HotkeyManager
+    @ObservedObject var captureStore: CaptureStore
+    let preview: PreviewCoordinator
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -161,7 +163,15 @@ struct MenuContentView: View {
     // MARK: Footer (utility actions)
 
     private var footerSection: some View {
-        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+            MenuRow(
+                icon: "rectangle.stack",
+                title: "Show Last Preview",
+                isEnabled: captureStore.latestBatch != nil
+            ) {
+                preview.showLatest()
+            }
+
             MenuRow(icon: "folder", title: "Reveal Save Folder") {
                 shots.revealSaveLocationInFinder()
             }
@@ -215,6 +225,7 @@ private struct MenuRow: View {
     let title: String
     var shortcut: String? = nil
     var role: MenuRowRole = .normal
+    var isEnabled: Bool = true
     let action: () -> Void
 
     @State private var isHovering = false
@@ -248,6 +259,8 @@ private struct MenuRow: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
         .padding(.horizontal, 6)
         .onHover { hovering in
             isHovering = hovering

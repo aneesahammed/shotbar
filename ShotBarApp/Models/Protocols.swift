@@ -22,7 +22,7 @@ protocol HotkeyRegistrable {
 
 /// Protocol for screenshot capture operations
 protocol ScreenshotCapturable {
-    func captureSelection()
-    func captureActiveWindow()
-    func captureFullScreens()
+    func captureSelection(bypassPreview: Bool)
+    func captureActiveWindow(bypassPreview: Bool)
+    func captureFullScreens(bypassPreview: Bool)
 }

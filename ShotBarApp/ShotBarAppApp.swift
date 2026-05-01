@@ -3,6 +3,7 @@ import AppKit
 
 // MARK: - AppDelegate to run launch-time setup (Scene has no onAppear)
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
@@ -33,7 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: MenuContentView(
                 prefs: AppServices.shared.prefs,
                 shots: AppServices.shared.shots,
-                hotkeys: AppServices.shared.hotkeys
+                hotkeys: AppServices.shared.hotkeys,
+                captureStore: AppServices.shared.captureStore,
+                preview: AppServices.shared.preview
             )
                 .frame(minWidth: AppConstants.menuMinWidth)
                 .padding(.vertical, AppConstants.menuPadding)

@@ -1,13 +1,19 @@
 import Foundation
 import Combine
+import AppKit
 
 // MARK: - App Services (singletons to simplify wiring)
 
+@MainActor
 final class AppServices {
     static let shared = AppServices()
     
     let prefs: Preferences
     let hotkeys: HotkeyManager
+    let persistence: ImagePersistenceService
+    let captureStore: CaptureStore
+    let editor: EditorCoordinator
+    let preview: PreviewCoordinator
     let shots: ScreenshotManager
     
     private var cs = Set<AnyCancellable>()
@@ -16,7 +22,16 @@ final class AppServices {
         let prefs = Preferences()
         self.prefs = prefs
         self.hotkeys = HotkeyManager()
-        self.shots = ScreenshotManager(prefs: prefs)
+        self.persistence = ImagePersistenceService(prefs: prefs)
+        self.captureStore = CaptureStore()
+        self.editor = EditorCoordinator(prefs: prefs, persistence: persistence, store: captureStore)
+        self.preview = PreviewCoordinator(prefs: prefs, store: captureStore, persistence: persistence, editor: editor)
+        self.shots = ScreenshotManager(
+            prefs: prefs,
+            persistence: persistence,
+            captureStore: captureStore,
+            previewCoordinator: preview
+        )
 
         // Rebind hotkeys whenever prefs change.
         prefs.$selectionHotkey.merge(with: prefs.$windowHotkey, prefs.$screenHotkey)
@@ -33,11 +48,18 @@ final class AppServices {
     
     func rebindHotkeys() {
         hotkeys.unregisterAll()
-        if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { [weak self] in self?.shots.captureSelection() } }
-        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { [weak self] in
-            self?.shots.storePreviousActiveApp()
-            self?.shots.captureActiveWindow()
+        if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { [weak self] in
+            let bypassPreview = NSEvent.modifierFlags.contains(.option)
+            self?.shots.captureSelection(bypassPreview: bypassPreview)
         } }
-        if let hk = prefs.screenHotkey    { hotkeys.register(id: .screen,    hotkey: hk) { [weak self] in self?.shots.captureFullScreens() } }
+        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { [weak self] in
+            let bypassPreview = NSEvent.modifierFlags.contains(.option)
+            self?.shots.storePreviousActiveApp()
+            self?.shots.captureActiveWindow(bypassPreview: bypassPreview)
+        } }
+        if let hk = prefs.screenHotkey    { hotkeys.register(id: .screen,    hotkey: hk) { [weak self] in
+            let bypassPreview = NSEvent.modifierFlags.contains(.option)
+            self?.shots.captureFullScreens(bypassPreview: bypassPreview)
+        } }
     }
 }

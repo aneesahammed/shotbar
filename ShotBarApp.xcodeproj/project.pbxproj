@@ -9,6 +9,7 @@
 /* Begin PBXFileReference section */
 		4F7C13C52E46B1AC0070BCB2 /* ShotBarApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ShotBarApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4F7C13C82E46B1AC0070BCB2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		6A1111112E80000100000001 /* ShotBarAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShotBarAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -17,10 +18,22 @@
 			path = ShotBarApp;
 			sourceTree = "<group>";
 		};
+		6A1111112E80000100000002 /* ShotBarAppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ShotBarAppTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		4F7C13C22E46B1AC0070BCB2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A1111112E80000100000003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -34,6 +47,7 @@
 			isa = PBXGroup;
 			children = (
 				4F7C13C72E46B1AC0070BCB2 /* ShotBarApp */,
+				6A1111112E80000100000002 /* ShotBarAppTests */,
 				4F7C13C62E46B1AC0070BCB2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -42,11 +56,22 @@
 			isa = PBXGroup;
 			children = (
 				4F7C13C52E46B1AC0070BCB2 /* ShotBarApp.app */,
+				6A1111112E80000100000001 /* ShotBarAppTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		6A1111112E80000100000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4F7C13BD2E46B1AC0070BCB2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4F7C13C42E46B1AC0070BCB2;
+			remoteInfo = ShotBarApp;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXNativeTarget section */
 		4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */ = {
@@ -71,6 +96,29 @@
 			productReference = 4F7C13C52E46B1AC0070BCB2 /* ShotBarApp.app */;
 			productType = "com.apple.product-type.application";
 		};
+		6A1111112E80000100000006 /* ShotBarAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6A1111112E8000010000000B /* Build configuration list for PBXNativeTarget "ShotBarAppTests" */;
+			buildPhases = (
+				6A1111112E80000100000005 /* Sources */,
+				6A1111112E80000100000003 /* Frameworks */,
+				6A1111112E80000100000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6A1111112E80000100000008 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				6A1111112E80000100000002 /* ShotBarAppTests */,
+			);
+			name = ShotBarAppTests;
+			packageProductDependencies = (
+			);
+			productName = ShotBarAppTests;
+			productReference = 6A1111112E80000100000001 /* ShotBarAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -80,12 +128,16 @@
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
-				TargetAttributes = {
-					4F7C13C42E46B1AC0070BCB2 = {
-						CreatedOnToolsVersion = 16.4;
+					TargetAttributes = {
+						4F7C13C42E46B1AC0070BCB2 = {
+							CreatedOnToolsVersion = 16.4;
+						};
+						6A1111112E80000100000006 = {
+							CreatedOnToolsVersion = 16.4;
+							TestTargetID = 4F7C13C42E46B1AC0070BCB2;
+						};
 					};
 				};
-			};
 			buildConfigurationList = 4F7C13C02E46B1AC0070BCB2 /* Build configuration list for PBXProject "ShotBarApp" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -99,14 +151,22 @@
 			productRefGroup = 4F7C13C62E46B1AC0070BCB2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (
-				4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */,
-			);
-		};
+				targets = (
+					4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */,
+					6A1111112E80000100000006 /* ShotBarAppTests */,
+				);
+			};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		4F7C13C32E46B1AC0070BCB2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A1111112E80000100000004 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -123,7 +183,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		6A1111112E80000100000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		6A1111112E80000100000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4F7C13C42E46B1AC0070BCB2 /* ShotBarApp */;
+			targetProxy = 6A1111112E80000100000007 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4F7C13CF2E46B1AD0070BCB2 /* Debug */ = {
@@ -299,6 +374,50 @@
 			};
 			name = Release;
 		};
+		6A1111112E80000100000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_TESTING_SEARCH_PATHS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shotbarapp.ShotBarAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ShotBarApp.app/Contents/MacOS/ShotBarApp";
+			};
+			name = Debug;
+		};
+		6A1111112E8000010000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_TESTING_SEARCH_PATHS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shotbarapp.ShotBarAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ShotBarApp.app/Contents/MacOS/ShotBarApp";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -316,6 +435,15 @@
 			buildConfigurations = (
 				4F7C13D22E46B1AD0070BCB2 /* Debug */,
 				4F7C13D32E46B1AD0070BCB2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6A1111112E8000010000000B /* Build configuration list for PBXNativeTarget "ShotBarAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A1111112E80000100000009 /* Debug */,
+				6A1111112E8000010000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
