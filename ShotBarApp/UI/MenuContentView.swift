@@ -5,11 +5,16 @@ import SwiftUI
 struct MenuContentView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
+    @ObservedObject var hotkeys: HotkeyManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerSection
             Divider()
+            if let error = hotkeys.lastError {
+                hotkeyErrorSection(error)
+                Divider()
+            }
             settingsSection
             Divider()
             actionsSection
@@ -18,6 +23,19 @@ struct MenuContentView: View {
         }
         .frame(minWidth: AppConstants.menuMinWidth)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func hotkeyErrorSection(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     // MARK: Header

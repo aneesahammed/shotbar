@@ -60,17 +60,21 @@ enum CaptureGeometry {
         )
     }
 
-    static func screencaptureRect(selection: CGRect, screenFrame: CGRect) -> CGRect {
-        CGRect(
-            x: round(selection.minX),
-            y: round(screenFrame.maxY - selection.maxY),
-            width: round(selection.width),
-            height: round(selection.height)
+    static func clampedCropRect(
+        selection: CGRect,
+        screenFrame: CGRect,
+        scaleX: CGFloat,
+        scaleY: CGFloat,
+        displayPixelSize: CGSize
+    ) -> CGRect {
+        let rawRect = cropRect(
+            selection: selection,
+            screenFrame: screenFrame,
+            scaleX: scaleX,
+            scaleY: scaleY
         )
-    }
-
-    static func screencaptureArgument(for rect: CGRect) -> String {
-        "\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))"
+        let bounds = CGRect(origin: .zero, size: displayPixelSize)
+        return rawRect.intersection(bounds)
     }
 
     static func displayModePixelSize(for displayID: CGDirectDisplayID) -> CGSize? {

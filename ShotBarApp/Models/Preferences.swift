@@ -41,6 +41,11 @@ final class Preferences: ObservableObject, UserDefaultsSavable {
     
     private func load(key: String) -> Hotkey? {
         guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(Hotkey.self, from: data)
+        guard let hotkey = try? JSONDecoder().decode(Hotkey.self, from: data),
+              hotkey.isValid else {
+            defaults.removeObject(forKey: key)
+            return nil
+        }
+        return hotkey
     }
 }

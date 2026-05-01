@@ -15,6 +15,7 @@ xcuserdata/
 # Swift Package Manager
 .build/
 Package.resolved
+.venv/
 
 # CocoaPods
 Pods/
@@ -73,3 +74,4 @@ ExportOptions.plist
 # Build output
 dist/
 ShotBarApp-*.dmg
+/docs

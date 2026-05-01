@@ -28,7 +28,7 @@ ShotBarApp/
 ## Architecture Overview
 
 ### Models
-- **Hotkey**: Represents a keyboard shortcut with F-key support
+- **Hotkey**: Represents a Cmd+Shift+F-key shortcut
 - **Preferences**: User settings with persistence via UserDefaults
 - **Enums**: ImageFormat, Destination, and HotkeyID definitions
 

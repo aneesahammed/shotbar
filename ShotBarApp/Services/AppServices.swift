@@ -6,15 +6,23 @@ import Combine
 final class AppServices {
     static let shared = AppServices()
     
-    let prefs = Preferences()
-    let hotkeys = HotkeyManager()
-    let shots = ScreenshotManager()
+    let prefs: Preferences
+    let hotkeys: HotkeyManager
+    let shots: ScreenshotManager
     
     private var cs = Set<AnyCancellable>()
     
     private init() {
+        let prefs = Preferences()
+        self.prefs = prefs
+        self.hotkeys = HotkeyManager()
+        self.shots = ScreenshotManager(prefs: prefs)
+
         // Rebind hotkeys whenever prefs change.
         prefs.$selectionHotkey.merge(with: prefs.$windowHotkey, prefs.$screenHotkey)
+            .dropFirst(3)
+            .removeDuplicates()
+            .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebindHotkeys() }
             .store(in: &cs)
         

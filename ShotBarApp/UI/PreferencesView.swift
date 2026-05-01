@@ -3,9 +3,11 @@ import SwiftUI
 // MARK: - Preferences UI
 struct PreferencesView_Previews: PreviewProvider {
     static var previews: some View {
+        let prefs = Preferences()
         PreferencesView(
-            prefs: Preferences(),
-            shots: ScreenshotManager()
+            prefs: prefs,
+            shots: ScreenshotManager(prefs: prefs),
+            hotkeys: HotkeyManager()
         )
         .frame(width: 400, height: 300)
     }
@@ -14,6 +16,7 @@ struct PreferencesView_Previews: PreviewProvider {
 struct PreferencesView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
+    @ObservedObject var hotkeys: HotkeyManager
     
     var body: some View {
         Form {
@@ -23,7 +26,12 @@ struct PreferencesView: View {
                 HotkeyPickerRow(title: "Selection", selection: $prefs.selectionHotkey)
                 HotkeyPickerRow(title: "Active Window", selection: $prefs.windowHotkey)
                 HotkeyPickerRow(title: "Full Screen(s)", selection: $prefs.screenHotkey)
-                Text("Tip: Some keyboards require holding Fn for F-keys unless you enable \"Use F1, F2, etc. as standard function keys\".")
+                if let error = hotkeys.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Text("Tip: Hotkeys use Cmd+Shift with F1-F12. Some keyboards also require holding Fn unless you enable \"Use F1, F2, etc. as standard function keys\".")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(.bottom, 3)
@@ -39,7 +47,6 @@ struct PreferencesView: View {
 
         }
         .padding(16)
-        .padding(.horizontal, 16)
     }
 }
 
@@ -63,7 +70,7 @@ struct HotkeyPickerRow: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 120)
+                .frame(width: 160)
         }
         .padding(.horizontal, 24) // margin from other elements
         

@@ -30,7 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover?.contentSize = NSSize(width: AppConstants.menuMinWidth, height: 300)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(
-            rootView: MenuContentView(prefs: AppServices.shared.prefs, shots: AppServices.shared.shots)
+            rootView: MenuContentView(
+                prefs: AppServices.shared.prefs,
+                shots: AppServices.shared.shots,
+                hotkeys: AppServices.shared.hotkeys
+            )
                 .frame(minWidth: AppConstants.menuMinWidth)
                 .padding(.vertical, AppConstants.menuPadding)
         )
@@ -141,7 +145,11 @@ struct ShotBarApp: App {
     var body: some Scene {
         // Preferences window
         Settings {
-            PreferencesView(prefs: AppServices.shared.prefs, shots: AppServices.shared.shots)
+            PreferencesView(
+                prefs: AppServices.shared.prefs,
+                shots: AppServices.shared.shots,
+                hotkeys: AppServices.shared.hotkeys
+            )
                 .frame(width: AppConstants.preferencesWidth)
         }
     }

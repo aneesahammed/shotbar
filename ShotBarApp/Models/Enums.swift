@@ -14,4 +14,12 @@ enum Destination: String, Codable, CaseIterable, Identifiable {
 
 enum HotkeyID: UInt32 { 
     case selection = 1, window = 2, screen = 3 
+
+    var label: String {
+        switch self {
+        case .selection: return "Selection"
+        case .window: return "Active Window"
+        case .screen: return "Full Screen"
+        }
+    }
 }

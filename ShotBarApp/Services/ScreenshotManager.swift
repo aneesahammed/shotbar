@@ -12,7 +12,7 @@ import AppKit
 final class ScreenshotManager: ObservableObject {
     @Published var saveDirectory: URL?
     private let toast = Toast()
-    private var prefs: Preferences { AppServices.shared.prefs }
+    private let prefs: Preferences
 
     // Persist capture scale (pixels-per-point) for accurate clipboard DPI/size
     private var lastCapturePixelsPerPoint: CGFloat = 1.0
@@ -20,12 +20,14 @@ final class ScreenshotManager: ObservableObject {
     // Add property to store the previous active application
     private var previousActiveApp: NSRunningApplication?
 
+    init(prefs: Preferences) {
+        self.prefs = prefs
+    }
+
     // MARK: Save location
 
     func refreshSaveDirectory() {
-        // Use the app's Documents directory instead of Desktop to avoid permission issues
-        // The Desktop directory requires special entitlements and can cause sandbox permission errors
-        // The Documents directory is always accessible within the app's sandbox
+        // Use the app's sandboxed Documents directory and surface it through Reveal Save Folder.
         let documentsDir = appDocumentsDirectory()
         saveDirectory = documentsDir
         print("Save directory set to: \(documentsDir.path)")
@@ -52,18 +54,6 @@ final class ScreenshotManager: ObservableObject {
                     do {
                         // Allow the overlay windows to fully dismiss before capturing
                         try? await Task.sleep(nanoseconds: 150_000_000)
-                        let nativeRect = CaptureGeometry.screencaptureRect(selection: selection, screenFrame: screen.frame)
-                        do {
-                            try self.saveNativeScreencapture(
-                                captureArguments: ["-R", CaptureGeometry.screencaptureArgument(for: nativeRect)],
-                                suffix: "Selection",
-                                logicalSize: selection.size
-                            )
-                            return
-                        } catch {
-                            print("Native selection capture failed, falling back to ScreenCaptureKit: \(error)")
-                        }
-
                         let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
                         self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
                     } catch {
@@ -124,17 +114,6 @@ final class ScreenshotManager: ObservableObject {
                 let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
                 let config = SCStreamConfiguration()
 
-                do {
-                    try self.saveNativeScreencapture(
-                        captureArguments: ["-l", "\(targetWindow.windowID)"],
-                        suffix: "Window",
-                        logicalSize: targetWindow.frame.size
-                    )
-                    return
-                } catch {
-                    print("Native window capture failed, falling back to ScreenCaptureKit: \(error)")
-                }
-
                 let scale = self.pixelScale(for: targetWindow.frame, preferredScale: CGFloat(filter.pointPixelScale))
                 config.width = max(1, Int(round(targetWindow.frame.width * scale.width)))
                 config.height = max(1, Int(round(targetWindow.frame.height * scale.height)))
@@ -191,21 +170,6 @@ final class ScreenshotManager: ObservableObject {
                     let filter = SCContentFilter(display: d, excludingWindows: [])
                     let config = SCStreamConfiguration()
                     let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
-
-                    if let ns = screen(for: d) {
-                        let nativeRect = CaptureGeometry.screencaptureRect(selection: ns.frame, screenFrame: ns.frame)
-                        do {
-                            try self.saveNativeScreencapture(
-                                captureArguments: ["-R", CaptureGeometry.screencaptureArgument(for: nativeRect)],
-                                suffix: suffix,
-                                logicalSize: ns.frame.size
-                            )
-                            saved += 1
-                            continue
-                        } catch {
-                            print("Native display capture failed, falling back to ScreenCaptureKit: \(error)")
-                        }
-                    }
 
                     let px = displayPixelSize(for: d, preferredScale: CGFloat(filter.pointPixelScale))
                     config.width = px.width
@@ -267,17 +231,16 @@ final class ScreenshotManager: ObservableObject {
 
         let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
         let displaySize = displayPixelSize(for: scDisplay, screen: screen, preferredScale: CGFloat(filter.pointPixelScale))
-        let cropRect = CaptureGeometry.cropRect(
+        let cropRect = CaptureGeometry.clampedCropRect(
             selection: selection,
             screenFrame: screen.frame,
             scaleX: displaySize.scale.width,
-            scaleY: displaySize.scale.height
+            scaleY: displaySize.scale.height,
+            displayPixelSize: CGSize(width: displaySize.width, height: displaySize.height)
         )
 
-        guard cropRect.width >= 1, cropRect.height >= 1,
-              cropRect.minX >= 0, cropRect.minY >= 0,
-              cropRect.maxX <= CGFloat(displaySize.width),
-              cropRect.maxY <= CGFloat(displaySize.height) else {
+        guard !cropRect.isNull, !cropRect.isEmpty,
+              cropRect.width >= 1, cropRect.height >= 1 else {
             throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection invalid or out of bounds"])
         }
 
@@ -373,107 +336,80 @@ final class ScreenshotManager: ObservableObject {
 
     // MARK: Saving
 
+    private struct SaveRequest {
+        let cgImage: CGImage
+        let suffix: String
+        let destination: Destination
+        let imageFormat: ImageFormat
+        let saveDirectory: URL
+        let pixelsPerPoint: CGFloat
+    }
+
+    private enum SaveResult {
+        case copied
+        case saved(URL)
+        case failed(String)
+    }
+
     private func saveAccordingToPreferences(cgImage: CGImage, suffix: String) {
-        switch prefs.destination {
-        case .clipboard:
-            self.saveToClipboard(cgImage: cgImage)
-        case .file:
-            self.save(cgImage: cgImage, suffix: suffix)
-        }
-    }
+        let request = SaveRequest(
+            cgImage: cgImage,
+            suffix: suffix,
+            destination: prefs.destination,
+            imageFormat: prefs.imageFormat,
+            saveDirectory: saveDirectory ?? appDocumentsDirectory(),
+            pixelsPerPoint: max(lastCapturePixelsPerPoint, 1.0)
+        )
 
-    private func saveNativeScreencapture(captureArguments: [String], suffix: String, logicalSize: CGSize?) throws {
-        let baseArguments = ["-x", "-t", "png"] + captureArguments
-
-        switch prefs.destination {
-        case .clipboard:
-            try runScreencapture(arguments: baseArguments + ["-c"])
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Screenshot copied to clipboard", kind: .success)
-                self?.playShutterSoundIfEnabled()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let result = self.performSave(request)
+            await MainActor.run {
+                self.presentSaveResult(result)
             }
-        case .file:
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("ShotBarApp-\(UUID().uuidString)")
-                .appendingPathExtension("png")
-            defer { try? FileManager.default.removeItem(at: tempURL) }
-
-            try runScreencapture(arguments: baseArguments + [tempURL.path])
-            let cgImage = try loadCGImage(from: tempURL)
-            updateLastCaptureScale(cgImage: cgImage, logicalSize: logicalSize)
-            save(cgImage: cgImage, suffix: suffix)
         }
     }
 
-    private func runScreencapture(arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = arguments
-
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError(
-                domain: "ShotBar",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: message?.isEmpty == false ? message! : "screencapture failed"]
-            )
+    private func performSave(_ request: SaveRequest) -> SaveResult {
+        do {
+            switch request.destination {
+            case .clipboard:
+                try copyToClipboard(cgImage: request.cgImage, pixelsPerPoint: request.pixelsPerPoint)
+                return .copied
+            case .file:
+                let url = try saveImageFile(request)
+                return .saved(url)
+            }
+        } catch {
+            print("Screenshot save failed: \(error)")
+            return .failed(userFacingSaveError(for: error))
         }
     }
 
-    private func loadCGImage(from url: URL) throws -> CGImage {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-            throw NSError(domain: "ShotBar", code: -20, userInfo: [NSLocalizedDescriptionKey: "Failed to load native screenshot"])
+    @MainActor
+    private func presentSaveResult(_ result: SaveResult) {
+        switch result {
+        case .copied:
+            toast.show(text: "Screenshot copied to clipboard", kind: .success)
+            playShutterSoundIfEnabled()
+        case .saved(let url):
+            toast.show(text: "Saved \(url.lastPathComponent)", kind: .success)
+            playShutterSoundIfEnabled()
+        case .failed(let message):
+            toast.show(text: message, kind: .error)
         }
-        return image
     }
 
-    private func updateLastCaptureScale(cgImage: CGImage, logicalSize: CGSize?) {
-        guard let logicalSize,
-              logicalSize.width > 0,
-              logicalSize.height > 0 else {
-            lastCapturePixelsPerPoint = 1.0
-            return
+    private func copyToClipboard(cgImage: CGImage, pixelsPerPoint: CGFloat) throws {
+        let dpi = 72.0 * Double(max(pixelsPerPoint, 1.0))
+        guard let pngData = createHighQualityPNGData(from: cgImage, dpi: dpi) else {
+            throw NSError(domain: "ShotBar", code: -30, userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot for clipboard"])
         }
 
-        let scaleX = CGFloat(cgImage.width) / logicalSize.width
-        let scaleY = CGFloat(cgImage.height) / logicalSize.height
-        lastCapturePixelsPerPoint = max(scaleX, scaleY, 1.0)
-    }
-
-    private func saveToClipboard(cgImage: CGImage) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-
-        let scale = max(self.lastCapturePixelsPerPoint, 1.0)
-        let logicalSize = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
-
-        let imageRep = NSBitmapImageRep(cgImage: cgImage)
-        imageRep.size = logicalSize
-
-        let nsImage = NSImage(size: logicalSize)
-        nsImage.addRepresentation(imageRep)
-
-        // Write TIFF data using standard NSImage method
-        if let tiffData = nsImage.tiffRepresentation {
-            pasteboard.setData(tiffData, forType: .tiff)
-        }
-
-        // Write PNG data using rep with no compression for high quality
-        if let pngData = imageRep.representation(using: .png, properties: [.compressionFactor: 0.0]) {
-            pasteboard.setData(pngData, forType: .png)
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.toast.show(text: "Screenshot copied to clipboard")
-            self?.playShutterSoundIfEnabled()
+        guard pasteboard.setData(pngData, forType: .png) else {
+            throw NSError(domain: "ShotBar", code: -31, userInfo: [NSLocalizedDescriptionKey: "Could not copy screenshot to clipboard"])
         }
     }
 
@@ -504,31 +440,6 @@ final class ScreenshotManager: ObservableObject {
         return data as Data
     }
 
-    private func createHighQualityTIFFData(from cgImage: CGImage, dpi: Double? = nil) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.tiff.identifier as CFString, 1, nil) else {
-            return nil
-        }
-
-        var props: [CFString: Any] = [
-            kCGImageDestinationEmbedThumbnail: false,
-            kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB
-        ]
-        if let dpi {
-            props[kCGImagePropertyDPIWidth] = dpi
-            props[kCGImagePropertyDPIHeight] = dpi
-            props[kCGImagePropertyTIFFDictionary] = [
-                kCGImagePropertyTIFFXResolution: dpi,
-                kCGImagePropertyTIFFYResolution: dpi,
-                kCGImagePropertyTIFFResolutionUnit: 2 // inches
-            ] as CFDictionary
-        }
-
-        CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return data as Data
-    }
-
     // MARK: - Heuristics
     private func isMostlyBlack(_ cgImage: CGImage) -> Bool {
         guard let provider = cgImage.dataProvider, let data = provider.data as Data? else { return false }
@@ -540,7 +451,6 @@ final class ScreenshotManager: ObservableObject {
         var index = 0
         for _ in 0..<maxSamples {
             if index + bytesPerPixel <= data.count {
-                let r, g, b: Int
                 // Try to handle both BGRA and ARGB without depending on bitmapInfo
                 if bytesPerPixel >= 4 {
                     // Read four bytes
@@ -565,46 +475,51 @@ final class ScreenshotManager: ObservableObject {
         return fraction < 0.01
     }
 
-    private func save(cgImage: CGImage, suffix: String) {
-        let dir = saveDirectory ?? appDocumentsDirectory()
-        let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
-        let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
+    private func saveImageFile(_ request: SaveRequest) throws -> URL {
+        let ext = request.imageFormat == .png ? "png" : "jpg"
+        try FileManager.default.createDirectory(at: request.saveDirectory, withIntermediateDirectories: true, attributes: nil)
 
-        print("Attempting to save screenshot to: \(url.path)")
+        let url = nextAvailableURL(
+            in: request.saveDirectory,
+            baseName: filename(suffix: request.suffix),
+            extension: ext
+        )
+        let dpi = 72.0 * Double(max(request.pixelsPerPoint, 1.0))
 
-        do {
-            // Ensure directory exists and is writable
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-
-            let dpi = 72.0 * Double(self.lastCapturePixelsPerPoint)
-
-            // Try to save the image
-            switch prefs.imageFormat {
-            case .png: try savePNG(cgImage: cgImage, to: url, dpi: dpi)
-            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 1.0, dpi: dpi)
-            }
-            print("Successfully saved screenshot to: \(url.path)")
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Saved \(url.lastPathComponent)", kind: .success)
-                self?.playShutterSoundIfEnabled()
-            }
-        } catch {
-            // Log the error for debugging
-            print("Save failed: \(error)")
-            print("Save directory: \(dir.path)")
-            print("Save URL: \(url.path)")
-
-            // If saving to the preferred location fails, show error message
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Save failed: \(error.localizedDescription)", kind: .error)
-            }
+        switch request.imageFormat {
+        case .png:
+            try savePNG(cgImage: request.cgImage, to: url, dpi: dpi)
+        case .jpg:
+            try saveJPG(cgImage: request.cgImage, to: url, quality: 1.0, dpi: dpi)
         }
+
+        return url
     }
 
     private func filename(suffix: String) -> String {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return "Screenshot \(df.string(from: Date())) \(suffix)"
+    }
+
+    private func nextAvailableURL(in directory: URL, baseName: String, extension ext: String) -> URL {
+        var candidate = directory.appendingPathComponent(baseName).appendingPathExtension(ext)
+        var counter = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = directory
+                .appendingPathComponent("\(baseName) (\(counter))")
+                .appendingPathExtension(ext)
+            counter += 1
+        }
+        return candidate
+    }
+
+    private func userFacingSaveError(for error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == "ShotBar" {
+            return nsError.localizedDescription
+        }
+        return "Save failed. Check the save folder permissions."
     }
 
     private func savePNG(cgImage: CGImage, to url: URL, dpi: Double) throws {
@@ -614,7 +529,7 @@ final class ScreenshotManager: ObservableObject {
         }
 
         // Add image metadata and properties for better quality
-        var props: [CFString: Any] = [
+        let props: [CFString: Any] = [
             kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
             kCGImageDestinationEmbedThumbnail: false,
             kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
@@ -634,7 +549,7 @@ final class ScreenshotManager: ObservableObject {
         }
 
         // Enhanced JPEG properties for better quality
-        var props: [CFString: Any] = [
+        let props: [CFString: Any] = [
             kCGImageDestinationLossyCompressionQuality: quality,
             kCGImageDestinationEmbedThumbnail: false,
             kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
@@ -649,13 +564,14 @@ final class ScreenshotManager: ObservableObject {
     }
 
     private func playShutterSoundIfEnabled() {
-        guard AppServices.shared.prefs.soundEnabled else { return }
+        guard prefs.soundEnabled else { return }
         NSSound(named: NSSound.Name("Tink"))?.play()
     }
 
     private func appDocumentsDirectory() -> URL {
-        // Get the app's Documents directory and ensure it exists
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        // File captures intentionally stay inside the app sandbox.
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
 
         // Create the directory if it doesn't exist
         do {
@@ -665,22 +581,6 @@ final class ScreenshotManager: ObservableObject {
         }
 
         return documentsURL
-    }
-
-    private func defaultDesktop() -> URL {
-        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-    }
-
-    private func macOSScreenshotDirectory() -> URL? {
-        let domain = "com.apple.screencapture" as CFString
-        if let v = CFPreferencesCopyAppValue("location" as CFString, domain) {
-            if CFGetTypeID(v) == CFStringGetTypeID() {
-                return URL(fileURLWithPath: v as! String, isDirectory: true)
-            } else if CFGetTypeID(v) == CFURLGetTypeID() {
-                return (v as! URL)
-            }
-        }
-        return nil
     }
 
     // Helper function to create a tighter frame that avoids overlapping UI elements

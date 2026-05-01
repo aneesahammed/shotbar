@@ -25,13 +25,13 @@ A modern, lightweight macOS screenshot utility built with SwiftUI and ScreenCapt
 - **🖥️ Full Screen**: Captures all connected displays
 
 ### ⚡ Quick Access
-- **Global Hotkeys**: Customizable F-key shortcuts (F1-F12)
+- **Global Hotkeys**: Customizable Cmd+Shift+F-key shortcuts (F1-F12)
 - **Menu Bar Integration**: Clean popover interface
 - **Instant Feedback**: HUD notifications and optional shutter sound
 
 ### 💾 Save Options
 - **Clipboard**: Copy screenshots directly to clipboard
-- **File System**: Save to customizable location
+- **File System**: Save to the app's sandboxed Documents folder
 - **Format Support**: PNG (lossless) or JPEG (high quality)
 - **Smart Naming**: Automatic timestamp-based filenames
 
@@ -71,14 +71,14 @@ xcodebuild -scheme ShotBarApp -configuration Release build
 ## 🎮 Usage
 
 ### Default Hotkeys
-- **F1**: Selection capture (drag to select area)
-- **F2**: Active window capture  
-- **F3**: Full screen capture
+- **Cmd+Shift+F1**: Selection capture (drag to select area)
+- **Cmd+Shift+F2**: Active window capture
+- **Cmd+Shift+F3**: Full screen capture
 
 ### Customization
 Click the menu bar icon (📷) to access preferences:
-- **Hotkeys**: Assign any F1-F12 key to capture modes
-- **Save Location**: Choose clipboard or file destination
+- **Hotkeys**: Assign any Cmd+Shift+F1-F12 shortcut to capture modes
+- **Save Location**: Choose clipboard or file destination. File saves go to the app's sandboxed Documents folder; use **Reveal Save Folder** from the menu to open it.
 - **Image Format**: PNG or JPEG
 - **Sound**: Enable/disable shutter sound
 
@@ -141,6 +141,7 @@ xcodebuild test -scheme ShotBarApp
 
 #### Hotkey System
 - **Carbon Event Manager**: Uses stable Carbon APIs for system-wide hotkey capture
+- **Required Modifiers**: Hotkeys are registered with Cmd+Shift to avoid hijacking bare system function keys
 - **Hot Swapping**: Hotkeys can be changed at runtime without restart
 - **Conflict Prevention**: Uses unique event signatures to prevent conflicts
 
@@ -189,7 +190,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Hotkeys Don't Respond
 - **Problem**: Function keys don't trigger screenshots
-- **Solution**: Check System Preferences → Keyboard → "Use F1, F2, etc. keys as standard function keys"
+- **Solution**: Use Cmd+Shift with the configured F-key. If your keyboard maps F-keys to media controls, also hold Fn or enable "Use F1, F2, etc. keys as standard function keys" in System Settings → Keyboard.
 
 ### Quality Issues
 - **Problem**: Blurry or low-quality screenshots

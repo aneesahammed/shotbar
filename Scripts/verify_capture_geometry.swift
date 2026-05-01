@@ -36,20 +36,25 @@ struct CaptureGeometryVerifier {
 
         expect(secondaryCrop == CGRect(x: 304, y: 1666, width: 600, height: 400), "unexpected secondary-display crop rect: \(String(describing: secondaryCrop))")
 
-        let nativeRect = CaptureGeometry.screencaptureRect(
-            selection: CGRect(x: 120, y: 100, width: 400, height: 250),
-            screenFrame: CGRect(x: 0, y: 0, width: 2048, height: 1152)
+        let clampedLeftEdgeCrop = CaptureGeometry.clampedCropRect(
+            selection: CGRect(x: 2047.75, y: -50, width: 300, height: 200),
+            screenFrame: CGRect(x: 2048, y: -97, width: 1920, height: 1080),
+            scaleX: 2,
+            scaleY: 2,
+            displayPixelSize: CGSize(width: 3840, height: 2160)
         )
 
-        expect(nativeRect == CGRect(x: 120, y: 802, width: 400, height: 250), "unexpected native screencapture rect: \(String(describing: nativeRect))")
+        expect(clampedLeftEdgeCrop == CGRect(x: 0, y: 1666, width: 599, height: 400), "unexpected clamped left-edge crop: \(String(describing: clampedLeftEdgeCrop))")
 
-        let nativeSecondaryRect = CaptureGeometry.screencaptureRect(
-            selection: CGRect(x: 2200, y: -50, width: 300, height: 200),
-            screenFrame: CGRect(x: 2048, y: -97, width: 1920, height: 1080)
+        let clampedRightEdgeCrop = CaptureGeometry.clampedCropRect(
+            selection: CGRect(x: 2048 + 1800, y: -50, width: 121, height: 200),
+            screenFrame: CGRect(x: 2048, y: -97, width: 1920, height: 1080),
+            scaleX: 2,
+            scaleY: 2,
+            displayPixelSize: CGSize(width: 3840, height: 2160)
         )
 
-        expect(nativeSecondaryRect == CGRect(x: 2200, y: 833, width: 300, height: 200), "unexpected secondary native screencapture rect: \(String(describing: nativeSecondaryRect))")
-        expect(CaptureGeometry.screencaptureArgument(for: nativeRect) == "120,802,400,250", "unexpected screencapture argument")
+        expect(clampedRightEdgeCrop == CGRect(x: 3600, y: 1666, width: 240, height: 400), "unexpected clamped right-edge crop: \(String(describing: clampedRightEdgeCrop))")
 
         print("capture geometry checks passed")
     }
