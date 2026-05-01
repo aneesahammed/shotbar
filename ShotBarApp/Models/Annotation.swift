@@ -24,9 +24,11 @@ enum AnnotationLayer: Codable, Equatable, Identifiable {
     var bounds: CGRect {
         switch self {
         case .arrow(let layer):
-            // Pad for arrowhead (stroke * 4), halo (+3pt), and shadow blur (4pt) so dirty
-            // rects fully cover the new Skitch-style render footprint.
-            let padding = layer.style.strokeWidth * 4 + 12
+            // Pad for the Skitch silhouette's footprint:
+            //   - headWidth is intentionally huge (about stroke * 12 before length clamps)
+            //   - the tail collapses to a sharp point at the start point
+            //   - outline + shadow extend outside the filled silhouette
+            let padding = layer.style.strokeWidth * 7 + 24
             return CGRect(
                 x: min(layer.start.x, layer.end.x),
                 y: min(layer.start.y, layer.end.y),

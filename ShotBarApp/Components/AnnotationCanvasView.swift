@@ -97,7 +97,7 @@ final class AnnotationCanvasNSView: NSView {
         switch model.selectedTool {
         case .arrow:
             // Use ArrowGeometry as the single source of truth for "is this drag a renderable
-            // arrow?" — the mouse-up `distance > 4` gate above is looser than the renderer's
+            // arrow?" The mouse-up `distance > 4` gate above is looser than the renderer's
             // `max(stroke*2, 8)` reject threshold, so without this check a 5-7pt drag at
             // stroke 8 would commit a layer that both renderers silently no-op, leaving an
             // invisible entry in undo history.
@@ -197,11 +197,9 @@ final class AnnotationCanvasNSView: NSView {
         }
     }
 
-    /// Skitch-style arrow rendered into the live editor canvas.
-    /// Mirrors `AnnotationRenderer.drawArrow` — the only differences are AppKit's
-    /// `NSBezierPath` API and the flipped-view shadow offset (+y is down here).
-    /// Stroke width is multiplied by `imageScale` so what the user sees during drawing
-    /// matches what `AnnotationRenderer` produces when the document is exported.
+    /// SVG-style block annotation arrow rendered into the live editor canvas.
+    /// Mirrors `AnnotationRenderer.drawArrow`: sharp tip, oversized head, concave
+    /// shoulders, triangular shaft, pointed tail, same-color stroke, and soft shadow.
     private func drawArrow(_ layer: ArrowLayer, imageRect: CGRect) {
         let start = viewPoint(fromPixelPoint: layer.start, imageRect: imageRect)
         let end = viewPoint(fromPixelPoint: layer.end, imageRect: imageRect)
@@ -209,72 +207,71 @@ final class AnnotationCanvasNSView: NSView {
         let displayStroke = max(layer.style.strokeWidth * imageScale, 1)
         guard let geom = ArrowGeometry(start: start, end: end, strokeWidth: displayStroke) else { return }
 
-        let color = layer.style.color.nsColor
-        // 0.80 alpha matches AnnotationRenderer's halo so the live preview is faithful
-        // to the exported pixels.
-        let halo = NSColor.black.withAlphaComponent(0.80)
-        let haloStroke = displayStroke + 3
+        let path = arrowBodyPath(geom)
+        let fillColor = layer.style.color.arrowFillNSColor
+        let strokeColor = layer.style.color.arrowStrokeNSColor
 
         guard let cgContext = NSGraphicsContext.current?.cgContext else { return }
 
-        // PASS 1 — halo silhouette + single composited drop shadow via transparency layer.
-        // isFlipped == true → +y points down, so offset.height = +2 puts shadow visually below.
+        // PASS 1: SVG-style offset blur shadow under the entire silhouette.
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
-        shadow.shadowOffset = NSSize(width: 0, height: 2)
-        shadow.shadowBlurRadius = 4
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        shadow.shadowOffset = NSSize(width: geom.shadowOffset, height: geom.shadowOffset)
+        shadow.shadowBlurRadius = geom.shadowBlur
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.24)
         shadow.set()
         cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
-        drawArrowSilhouette(geom: geom, lineWidth: haloStroke, color: halo)
+        fillColor.setFill()
+        strokeColor.setStroke()
+        path.lineWidth = geom.outlineWidth
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.fill()
+        path.stroke()
         cgContext.endTransparencyLayer()
         NSGraphicsContext.restoreGraphicsState()
 
-        // PASS 2 — colored shaft (no shadow; lives on top of the halo).
+        // PASS 2: bright flat fill, like the supplied SVG.
         NSGraphicsContext.saveGraphicsState()
-        let shaft = NSBezierPath()
-        shaft.move(to: geom.start)
-        shaft.line(to: geom.shaftEnd)
-        shaft.lineWidth = displayStroke
-        shaft.lineCapStyle = .round
-        shaft.lineJoinStyle = .round
-        color.setStroke()
-        shaft.stroke()
+        fillColor.setFill()
+        path.fill()
         NSGraphicsContext.restoreGraphicsState()
 
-        // PASS 3 — colored arrowhead fill.
+        // PASS 3: darker same-color stroke, not a black comic outline.
         NSGraphicsContext.saveGraphicsState()
-        let head = NSBezierPath()
-        head.move(to: geom.tip)
-        head.line(to: geom.leftBase)
-        head.line(to: geom.rightBase)
-        head.close()
-        color.setFill()
-        head.fill()
+        strokeColor.setStroke()
+        path.lineWidth = geom.outlineWidth
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// Renders the unified arrow silhouette as a single shape.
-    /// Wraps its own state save/restore so callers don't need to.
-    private func drawArrowSilhouette(geom: ArrowGeometry, lineWidth: CGFloat, color: NSColor) {
-        NSGraphicsContext.saveGraphicsState()
-        let shaft = NSBezierPath()
-        shaft.move(to: geom.start)
-        shaft.line(to: geom.shaftEnd)
-        shaft.lineWidth = lineWidth
-        shaft.lineCapStyle = .round
-        shaft.lineJoinStyle = .round
-        color.setStroke()
-        shaft.stroke()
+    /// Closed SVG-style silhouette: sharp tip, concave shoulders, triangular shaft, pointed tail.
+    private func arrowBodyPath(_ geom: ArrowGeometry) -> NSBezierPath {
+        let path = NSBezierPath()
+        let headHalf = geom.headWidth / 2
+        let shoulderHalf = geom.shaftShoulderWidth / 2
 
-        let head = NSBezierPath()
-        head.move(to: geom.tip)
-        head.line(to: geom.leftBase)
-        head.line(to: geom.rightBase)
-        head.close()
-        color.setFill()
-        head.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        path.move(to: geom.point(axis: geom.tipEdgeAxis, normal: -geom.tipEdgeHalfWidth))
+        path.line(to: geom.point(axis: geom.headLength, normal: -headHalf))
+        path.addQuadCurve(
+            to: geom.point(axis: geom.shoulderAxis, normal: -headHalf * 0.89),
+            control: geom.point(axis: geom.shoulderControlAxis, normal: -headHalf * 1.06)
+        )
+        path.line(to: geom.point(axis: geom.notchAxis, normal: -shoulderHalf))
+        path.line(to: geom.point(axis: geom.length, normal: 0))
+        path.line(to: geom.point(axis: geom.notchAxis, normal: shoulderHalf))
+        path.line(to: geom.point(axis: geom.shoulderAxis, normal: headHalf * 0.89))
+        path.addQuadCurve(
+            to: geom.point(axis: geom.headLength, normal: headHalf),
+            control: geom.point(axis: geom.shoulderControlAxis, normal: headHalf * 1.06)
+        )
+        path.line(to: geom.point(axis: geom.tipEdgeAxis, normal: geom.tipEdgeHalfWidth))
+        path.line(to: geom.tip)
+        path.line(to: geom.point(axis: geom.tipEdgeAxis, normal: -geom.tipEdgeHalfWidth))
+        path.close()
+        return path
     }
 
     private func drawText(_ layer: TextLayer, imageRect: CGRect) {
@@ -365,6 +362,21 @@ final class AnnotationCanvasNSView: NSView {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
+    }
+}
+
+private extension NSBezierPath {
+    func addQuadCurve(to end: CGPoint, control: CGPoint) {
+        let start = currentPoint
+        let controlPoint1 = CGPoint(
+            x: start.x + (control.x - start.x) * 2 / 3,
+            y: start.y + (control.y - start.y) * 2 / 3
+        )
+        let controlPoint2 = CGPoint(
+            x: end.x + (control.x - end.x) * 2 / 3,
+            y: end.y + (control.y - end.y) * 2 / 3
+        )
+        curve(to: end, controlPoint1: controlPoint1, controlPoint2: controlPoint2)
     }
 }
 
