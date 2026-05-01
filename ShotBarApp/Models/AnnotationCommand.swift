@@ -77,6 +77,12 @@ final class AnnotationDocumentModel: ObservableObject {
         isDirty = true
     }
 
+    func replaceLayerForPreview(_ layer: AnnotationLayer) {
+        objectWillChange.send()
+        guard let index = document.layers.firstIndex(where: { $0.id == layer.id }) else { return }
+        document.layers[index] = layer
+    }
+
     func undo() {
         guard let command = history.popUndo() else { return }
         apply(command, direction: .reverse)

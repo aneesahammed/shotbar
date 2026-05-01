@@ -45,6 +45,43 @@ final class AnnotationCommandTests: XCTestCase {
         XCTAssertEqual(history.undoStack.first, .addLayer(two))
     }
 
+    func testUpdateLayerUndoRedoMovesTextAnnotation() throws {
+        let asset = try makeAsset()
+        let image = makeImage()
+        let defaults = UserDefaults(suiteName: "ShotBarAppTests.\(UUID().uuidString)")!
+        let prefs = Preferences(defaults: defaults)
+        let model = AnnotationDocumentModel(asset: asset, baseImage: image, prefs: prefs)
+        let style = AnnotationStyle(color: .red, strokeWidth: 4)
+        let original = TextLayer(
+            text: "Move me",
+            rect: CGRect(x: 1, y: 1, width: 5, height: 3),
+            style: style,
+            fontSize: 18
+        )
+        var moved = original
+        moved.rect.origin = CGPoint(x: 4, y: 5)
+
+        model.apply(.addLayer(.text(original)))
+        model.apply(.updateLayer(before: .text(original), after: .text(moved)))
+
+        guard case .text(let movedLayer) = model.document.layers.first else {
+            return XCTFail("Expected a text layer")
+        }
+        XCTAssertEqual(movedLayer.rect.origin, CGPoint(x: 4, y: 5))
+
+        model.undo()
+        guard case .text(let restoredLayer) = model.document.layers.first else {
+            return XCTFail("Expected a text layer")
+        }
+        XCTAssertEqual(restoredLayer.rect.origin, CGPoint(x: 1, y: 1))
+
+        model.redo()
+        guard case .text(let redoneLayer) = model.document.layers.first else {
+            return XCTFail("Expected a text layer")
+        }
+        XCTAssertEqual(redoneLayer.rect.origin, CGPoint(x: 4, y: 5))
+    }
+
     private func makeAsset() throws -> CaptureAsset {
         CaptureAsset(
             id: UUID(),

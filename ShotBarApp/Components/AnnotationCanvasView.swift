@@ -24,6 +24,8 @@ final class AnnotationCanvasNSView: NSView {
     private var dragStartPixel: CGPoint?
     private var dragCurrentPixel: CGPoint?
     private weak var activeTextView: CommitTextView?
+    private var selectedLayerID: UUID?
+    private var textMoveDrag: TextMoveDrag?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -67,16 +69,34 @@ final class AnnotationCanvasNSView: NSView {
         guard let pixel = pixelPoint(fromViewPoint: point) else { return }
 
         if model.selectedTool == .text {
+            if let layer = topmostTextLayer(at: pixel) {
+                selectedLayerID = layer.id
+                textMoveDrag = TextMoveDrag(
+                    original: layer,
+                    current: layer,
+                    grabOffset: CGPoint(x: pixel.x - layer.rect.minX, y: pixel.y - layer.rect.minY)
+                )
+                needsDisplay = true
+                return
+            }
+            selectedLayerID = nil
             beginTextEdit(at: point, pixel: pixel)
             return
         }
 
+        selectedLayerID = nil
         dragStartPixel = pixel
         dragCurrentPixel = pixel
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if textMoveDrag != nil {
+            let point = convert(event.locationInWindow, from: nil)
+            moveActiveText(to: point)
+            return
+        }
+
         guard dragStartPixel != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
         dragCurrentPixel = pixelPoint(fromViewPoint: point)
@@ -84,6 +104,11 @@ final class AnnotationCanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if textMoveDrag != nil {
+            finishTextMove()
+            return
+        }
+
         defer {
             dragStartPixel = nil
             dragCurrentPixel = nil
@@ -329,6 +354,19 @@ final class AnnotationCanvasNSView: NSView {
             .foregroundColor: layer.style.color.nsColor
         ]
         NSAttributedString(string: layer.text, attributes: attrs).draw(in: rect)
+
+        if selectedLayerID == layer.id {
+            drawSelectionRect(rect)
+        }
+    }
+
+    private func drawSelectionRect(_ rect: CGRect) {
+        let path = NSBezierPath(rect: rect.insetBy(dx: -4, dy: -3))
+        var dashes: [CGFloat] = [5, 3]
+        NSColor.controlAccentColor.setStroke()
+        path.lineWidth = 1.5
+        path.setLineDash(&dashes, count: dashes.count, phase: 0)
+        path.stroke()
     }
 
     private func drawBlurPlaceholder(_ layer: BlurLayer, imageRect: CGRect) {
@@ -377,6 +415,17 @@ final class AnnotationCanvasNSView: NSView {
         )
     }
 
+    private func clampedPixelPoint(fromViewPoint point: CGPoint) -> CGPoint? {
+        let rect = imageRect()
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let x = (point.x - rect.minX) / rect.width * model.document.basePixelSize.width
+        let y = (point.y - rect.minY) / rect.height * model.document.basePixelSize.height
+        return CGPoint(
+            x: min(max(x, 0), model.document.basePixelSize.width),
+            y: min(max(y, 0), model.document.basePixelSize.height)
+        )
+    }
+
     private func pixelRect(fromViewRect viewRect: CGRect) -> CGRect {
         let rect = imageRect()
         guard rect.width > 0, rect.height > 0 else { return .zero }
@@ -411,6 +460,64 @@ final class AnnotationCanvasNSView: NSView {
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
     }
+
+    private func topmostTextLayer(at pixel: CGPoint) -> TextLayer? {
+        let imageScale = imageRect().width / max(model.document.basePixelSize.width, 1)
+        let hitPadding = max(2, 6 / max(imageScale, 0.001))
+        for layer in model.document.layers.reversed() {
+            guard case .text(let text) = layer else { continue }
+            if text.rect.standardized.insetBy(dx: -hitPadding, dy: -hitPadding).contains(pixel) {
+                return text
+            }
+        }
+        return nil
+    }
+
+    private func moveActiveText(to viewPoint: CGPoint) {
+        guard var drag = textMoveDrag,
+              let pixel = clampedPixelPoint(fromViewPoint: viewPoint) else { return }
+
+        var updated = drag.current
+        updated.rect = boundedTextRect(
+            updated.rect,
+            origin: CGPoint(
+                x: pixel.x - drag.grabOffset.x,
+                y: pixel.y - drag.grabOffset.y
+            )
+        )
+        drag.current = updated
+        textMoveDrag = drag
+        model.replaceLayerForPreview(.text(updated))
+        needsDisplay = true
+    }
+
+    private func finishTextMove() {
+        guard let drag = textMoveDrag else { return }
+        defer {
+            textMoveDrag = nil
+            needsDisplay = true
+        }
+
+        guard drag.original.rect != drag.current.rect else { return }
+        model.apply(.updateLayer(before: .text(drag.original), after: .text(drag.current)))
+    }
+
+    private func boundedTextRect(_ rect: CGRect, origin: CGPoint) -> CGRect {
+        let size = model.document.basePixelSize
+        let standardized = rect.standardized
+        return CGRect(
+            x: min(max(origin.x, 0), max(0, size.width - standardized.width)),
+            y: min(max(origin.y, 0), max(0, size.height - standardized.height)),
+            width: standardized.width,
+            height: standardized.height
+        )
+    }
+}
+
+private struct TextMoveDrag {
+    var original: TextLayer
+    var current: TextLayer
+    var grabOffset: CGPoint
 }
 
 private extension NSBezierPath {
@@ -440,6 +547,16 @@ private final class CommitTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "z" {
+            if event.modifierFlags.contains(.shift) {
+                undoManager?.redo()
+            } else {
+                undoManager?.undo()
+            }
+            return
+        }
+
         if event.keyCode == 53 {
             didFinish = true
             onCancel?()
