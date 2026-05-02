@@ -34,7 +34,7 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
         collectionBehavior = [.transient, .ignoresCycle]
         delegate = self
         
-        let v = NSView(frame: contentRect)
+        let v = SelectionOverlayContentView(frame: contentRect)
         v.wantsLayer = true
         v.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.15).cgColor
         
@@ -102,6 +102,12 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
         SelectionOverlay.activeOverlays.removeAll()
         onComplete?(rect, s)
         onComplete = nil
+    }
+}
+
+private final class SelectionOverlayContentView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 

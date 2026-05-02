@@ -15,4 +15,17 @@ final class SelectionOverlayTests: XCTestCase {
         XCTAssertTrue(overlay.canBecomeKey)
         XCTAssertFalse(overlay.canBecomeMain)
     }
+
+    func testSelectionOverlayAcceptsFirstMouseForImmediateDrag() throws {
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let overlay = SelectionOverlay(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: true,
+            screen: screen
+        )
+
+        XCTAssertTrue(overlay.contentView?.acceptsFirstMouse(for: nil) ?? false)
+    }
 }
